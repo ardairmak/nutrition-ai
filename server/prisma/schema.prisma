@@ -1,0 +1,142 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model User {
+    id                    String               @id @default(uuid())
+    email                 String               @unique
+    passwordHash          String
+    firstName             String
+    lastName              String
+    dateOfBirth           DateTime?
+    gender                String?
+    height                Float?
+    weight                Float?
+    targetWeight          Float?
+    activityLevel         String?
+    dietaryPreferences    String[]
+    allergies             String[]
+    dailyCalorieGoal      Int?
+    proteinGoal           Float?
+    carbsGoal             Float?
+    fatGoal               Float?
+    phoneNumber           String
+    isVerified            Boolean              @default(false)
+    verificationCode      String?
+    verificationExpiresAt DateTime?
+    createdAt             DateTime             @default(now())
+    updatedAt             DateTime             @updatedAt
+    lastLogin             DateTime?
+    profilePicture        String?
+    mealEntries           MealEntry[]
+    weightHistory         WeightHistory[]
+    friendsInitiated      UserFriend[]         @relation("UserFriends")
+    friendsReceived       UserFriend[]         @relation("FriendToUser")
+    achievements          UserAchievement[]
+    mealRecommendations   MealRecommendation[]
+}
+
+model WeightHistory {
+    id         String   @id @default(uuid())
+    userId     String
+    user       User     @relation(fields: [userId], references: [id])
+    weight     Float
+    recordedAt DateTime @default(now())
+
+    @@index([userId, recordedAt])
+}
+
+model MealEntry {
+    id              String     @id @default(uuid())
+    userId          String
+    user            User       @relation(fields: [userId], references: [id])
+    mealType        String
+    mealName        String
+    totalCalories   Float
+    totalProtein    Float
+    totalCarbs      Float
+    totalFat        Float
+    gptAnalysisJson Json?
+    createdAt       DateTime   @default(now())
+    consumedAt      DateTime
+    foodItems       FoodItem[]
+
+    @@index([userId, createdAt])
+}
+
+model FoodItem {
+    id             String    @id @default(uuid())
+    mealEntryId    String
+    mealEntry      MealEntry @relation(fields: [mealEntryId], references: [id])
+    foodName       String
+    portionSize    Float
+    portionUnit    String
+    calories       Float
+    protein        Float
+    carbs          Float
+    fat            Float
+    fiber          Float?
+    sugar          Float?
+    sodium         Float?
+    source         String?
+    externalFoodId String?
+    isFavorite     Boolean   @default(false)
+
+    @@index([mealEntryId])
+    @@index([isFavorite])
+}
+
+model UserFriend {
+    id        String   @id @default(uuid())
+    userId    String
+    user      User     @relation("UserFriends", fields: [userId], references: [id])
+    friendId  String
+    friend    User     @relation("FriendToUser", fields: [friendId], references: [id])
+    status    String
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
+
+    @@unique([userId, friendId])
+    @@index([userId])
+    @@index([friendId])
+}
+
+model Achievement {
+    id               String            @id @default(uuid())
+    name             String
+    description      String
+    icon             String?
+    criteriaJson     Json
+    userAchievements UserAchievement[]
+}
+
+model UserAchievement {
+    id            String      @id @default(uuid())
+    userId        String
+    user          User        @relation(fields: [userId], references: [id])
+    achievementId String
+    achievement   Achievement @relation(fields: [achievementId], references: [id])
+    earnedAt      DateTime    @default(now())
+
+    @@unique([userId, achievementId])
+    @@index([userId])
+}
+
+model MealRecommendation {
+    id                 String   @id @default(uuid())
+    userId             String
+    user               User     @relation(fields: [userId], references: [id])
+    recommendationJson Json
+    createdAt          DateTime @default(now())
+    isViewed           Boolean  @default(false)
+
+    @@index([userId])
+}
