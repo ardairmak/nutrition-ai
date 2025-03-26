@@ -2,9 +2,11 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import dotenv from "dotenv";
+import passport from "passport";
 import { logger } from "./utils/logger";
 import authRoutes from "./routes/authRoutes";
 import userRoutes from "./routes/userRoutes";
+import "./config/passport"; // Import passport config
 
 // Load environment variables
 dotenv.config();
@@ -16,6 +18,9 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
+
+// Initialize Passport
+app.use(passport.initialize());
 
 // Routes
 app.get("/", (req, res) => {

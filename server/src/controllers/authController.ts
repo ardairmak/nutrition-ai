@@ -27,10 +27,15 @@ export const loginUser = async (req: Request, res: Response) => {
       });
     }
 
-    // Verify password
-    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-    if (!isPasswordValid) {
-      return res.status(401).json({ error: "Invalid credentials" });
+    // Verify password (skip for OAuth users)
+    if (user.passwordHash) {
+      const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+      if (!isPasswordValid) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+    } else if (!user.passwordHash && password) {
+      // User exists but has no password (OAuth user)
+      return res.status(401).json({ error: "Please login with Google" });
     }
 
     // Generate JWT token
@@ -65,6 +70,37 @@ export const loginUser = async (req: Request, res: Response) => {
   }
 };
 
+// Google OAuth Callback
+export const googleAuthCallback = (req: Request, res: Response) => {
+  try {
+    // User will be added to req by Passport.js
+    if (!req.user) {
+      return res.redirect(
+        `${process.env.CLIENT_URL}/auth?error=Authentication failed`
+      );
+    }
+
+    // Create JWT token
+    const secretKey = process.env.JWT_SECRET || "fallback-secret-key";
+    // @ts-ignore
+    const token = jwt.sign(
+      {
+        id: (req.user as { id: string }).id,
+        email: (req.user as { email: string }).email,
+      },
+      secretKey
+    );
+
+    // Redirect back to the client app with the token
+    return res.redirect(`${process.env.CLIENT_URL}/auth?token=${token}`);
+  } catch (error) {
+    logger.error(`Google auth callback error: ${error}`);
+    return res.redirect(
+      `${process.env.CLIENT_URL}/auth?error=Authentication failed`
+    );
+  }
+};
+
 // Reset password request
 export const requestPasswordReset = async (req: Request, res: Response) => {
   try {
@@ -79,6 +115,14 @@ export const requestPasswordReset = async (req: Request, res: Response) => {
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
+    }
+
+    // Check if user is an OAuth user
+    if (!user.passwordHash) {
+      return res.status(400).json({
+        error:
+          "This account uses Google login, password reset is not available",
+      });
     }
 
     // Generate verification code
