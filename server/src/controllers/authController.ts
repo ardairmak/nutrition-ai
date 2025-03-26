@@ -91,8 +91,73 @@ export const googleAuthCallback = (req: Request, res: Response) => {
       secretKey
     );
 
-    // Redirect back to the client app with the token
-    return res.redirect(`${process.env.CLIENT_URL}/auth?token=${token}`);
+    // Check if we're in development mode (for simulator testing)
+    const isDevelopment = process.env.NODE_ENV === "development";
+    const isSimulatorTest =
+      isDevelopment &&
+      (req.headers["user-agent"]?.includes("iPhone Simulator") ||
+        req.headers["user-agent"]?.includes("iOS") ||
+        req.headers["user-agent"]?.includes("Safari") ||
+        req.query.is_simulator === "true");
+
+    // For iOS simulator testing ONLY in development, show a page with the token
+    if (isSimulatorTest && process.env.SHOW_TOKEN_PAGE === "true") {
+      logger.info(
+        `User logged in via Google OAuth: ${(req.user as { id: string }).id}`
+      );
+      logger.info(`Auth token for simulator testing: ${token}`);
+
+      // Return an HTML page with the token for easy testing
+      return res.send(`
+        <html>
+          <head>
+            <title>Authentication Successful</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 20px; text-align: center; line-height: 1.6; }
+              .container { max-width: 500px; margin: 0 auto; }
+              .token-box { background: #f4f4f4; padding: 15px; border-radius: 5px; word-break: break-all; margin: 20px 0; text-align: left; }
+              h1 { color: #2c3e50; }
+              .success { color: #27ae60; }
+              button { background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 5px; font-size: 16px; cursor: pointer; margin-top: 15px; }
+              button:hover { background: #2980b9; }
+              a.redirect-link { display: inline-block; margin-top: 20px; color: #3498db; text-decoration: none; }
+              .note { font-size: 14px; color: #e74c3c; margin-top: 20px; }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <h1>Authentication Successful</h1>
+              <p class="success">✓ Your Google login was successful!</p>
+              <p>Your authentication token is:</p>
+              <div class="token-box" id="tokenBox">${token}</div>
+              <button onclick="copyToken()">Copy Token</button>
+              <p class="note">For simulator testing: Go back to the app and tap "Check for token"</p>
+              <p class="note">In a real device, this page would not appear, and the app would open automatically.</p>
+              <script>
+                function copyToken() {
+                  const tokenText = document.getElementById('tokenBox').innerText;
+                  navigator.clipboard.writeText(tokenText)
+                    .then(() => {
+                      alert('Token copied to clipboard. Now return to the app and tap "Check for token"');
+                    })
+                    .catch(err => {
+                      alert('Error copying token: ' + err);
+                    });
+                }
+              </script>
+            </div>
+          </body>
+        </html>
+      `);
+    }
+
+    // In production or when not testing, use the app scheme directly
+    // This is what real users will see - direct app redirect
+    logger.info(
+      `Redirecting to mobile app via scheme: foodrecognition://auth?token=${token}`
+    );
+    return res.redirect(`foodrecognition://auth?token=${token}`);
   } catch (error) {
     logger.error(`Google auth callback error: ${error}`);
     return res.redirect(
