@@ -34,10 +34,13 @@ passport.use(
               profilePicture: profile.photos?.[0]?.value,
               dietaryPreferences: [],
               allergies: [],
+              googleId: profile.id, // Set Google ID
             },
           });
 
-          logger.info(`New user created via Google OAuth: ${user.id}`);
+          logger.info(
+            `New user created via Google OAuth: ${user.id} with Google ID: ${profile.id}`
+          );
         } else {
           // Update existing user with latest Google profile data
           user = await prisma.user.update({
@@ -53,10 +56,13 @@ passport.use(
               profilePicture: profile.photos?.[0]?.value || user.profilePicture,
               isVerified: true,
               lastLogin: new Date(),
+              googleId: profile.id, // Set Google ID if not already set
             },
           });
 
-          logger.info(`User logged in via Google OAuth: ${user.id}`);
+          logger.info(
+            `User logged in via Google OAuth: ${user.id} with Google ID: ${profile.id}`
+          );
         }
 
         return done(null, {

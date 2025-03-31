@@ -2,16 +2,7 @@ import React, { createContext, useState, useContext, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { authService } from "../services/api";
 import * as WebBrowser from "expo-web-browser";
-import {
-  Alert,
-  Linking,
-  Platform,
-  TextInput,
-  View,
-  StyleSheet,
-  Button,
-  Modal,
-} from "react-native";
+import { Alert, Linking, Platform } from "react-native";
 
 type User = {
   id: string;
@@ -26,8 +17,11 @@ type AuthContextData = {
   isAuthenticated: boolean;
   isLoading: boolean;
   signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<boolean>;
+  createAccount: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   handleUrlRedirect: (url: string) => Promise<boolean>;
+  signIn: (email: string, password: string) => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
@@ -35,8 +29,9 @@ const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 // Initialize WebBrowser
 WebBrowser.maybeCompleteAuthSession();
 
-// Your server address
-const SERVER_ADDRESS = "localhost"; // Changed from IP address to localhost
+// Your server address - use localhost for simulator, IP for real device
+const SERVER_ADDRESS =
+  Platform.OS === "ios" && !Platform.isPad ? "localhost" : "192.168.0.18";
 
 // Storage keys
 const AUTH_TOKEN_KEY = "@auth_token";
@@ -47,8 +42,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [tokenModalVisible, setTokenModalVisible] = useState(false);
-  const [manualToken, setManualToken] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   // Set up URL event listener for deep linking
   useEffect(() => {
@@ -77,114 +71,91 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     // Load user from storage on app start
-    loadStoredUser();
+    checkExistingToken();
   }, []);
-
-  const loadStoredUser = async () => {
-    setIsLoading(true);
-
-    try {
-      // Load both token and user data from storage
-      const [token, userData] = await Promise.all([
-        AsyncStorage.getItem(AUTH_TOKEN_KEY),
-        AsyncStorage.getItem(USER_DATA_KEY),
-      ]);
-
-      if (token && userData) {
-        // We have cached user data, use it immediately
-        setUser(JSON.parse(userData));
-
-        try {
-          // Silently try to refresh user data from server
-          const freshUserData = await authService.getCurrentUser();
-          setUser(freshUserData);
-          // Update the cached user data
-          await AsyncStorage.setItem(
-            USER_DATA_KEY,
-            JSON.stringify(freshUserData)
-          );
-        } catch (error) {
-          console.log("Could not refresh user data, using cached data");
-          // If server refresh fails, we still have the cached data
-        }
-      } else if (token) {
-        // We have a token but no cached user data
-        try {
-          // Get user data from server
-          const userData = await authService.getCurrentUser();
-          setUser(userData);
-          // Cache the user data
-          await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
-        } catch (error) {
-          console.error("Failed to get user data:", error);
-          // Clear invalid token
-          await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to load user:", error);
-      // If loading fails, clear storage
-      await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, USER_DATA_KEY]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleUrlRedirect = async (url: string): Promise<boolean> => {
     console.log("Handling redirect URL:", url);
 
     try {
-      if (url.includes("token=")) {
-        // Extract token from URL
-        const params = new URLSearchParams(url.split("?")[1]);
-        const token = params.get("token");
+      // Skip if no URL
+      if (!url) return false;
 
-        if (token) {
-          console.log("Found token in URL, saving...");
-          // Save token
-          await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+      // Extract token from URL
+      let token = null;
 
-          // Get and save user data
-          const userData = await authService.getCurrentUser();
-          setUser(userData);
-          await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
+      // Try to extract token using URL parsing
+      try {
+        // Parse URL manually
+        const urlObj = new URL(url);
+        const params = urlObj.searchParams;
+        token = params.get("token");
+        console.log("Parsed URL params:", params.toString());
+      } catch (parseError) {
+        console.error("Error parsing URL:", parseError);
+      }
 
-          return true;
+      // Fallback methods if URL parsing doesn't work
+      if (!token) {
+        // Method 1: Extract from token=xyz query parameter
+        if (url.includes("token=")) {
+          const tokenPart = url.split("token=")[1];
+          if (tokenPart) {
+            token = tokenPart.split("&")[0];
+          }
+        }
+
+        // Method 2: Extract from path structure (e.g., /auth/token/xyz)
+        if (!token && url.includes("/auth/")) {
+          const parts = url.split("/");
+          const tokenIndex = parts.findIndex((part) => part === "auth") + 2;
+          if (tokenIndex < parts.length) {
+            token = parts[tokenIndex];
+          }
         }
       }
-      return false;
+
+      // Clean the token - remove any trailing hash or fragment
+      if (token && token.includes("#")) {
+        token = token.split("#")[0];
+      }
+
+      // Process the token if found
+      if (token) {
+        console.log("Found token in URL, saving cleaned token");
+
+        // Save token
+        await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+
+        // Get and store user data
+        try {
+          const userData = await authService.getCurrentUser();
+          if (userData) {
+            console.log("Successfully retrieved user data");
+            setUser(userData);
+            setIsAuthenticated(true);
+            await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
+            return true;
+          } else {
+            console.error("Got null user data with valid token");
+            setIsAuthenticated(false);
+            return false;
+          }
+        } catch (userError) {
+          console.error("Error getting user data:", userError);
+          await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+          setIsAuthenticated(false);
+          return false;
+        }
+      } else {
+        console.log("No token found in URL:", url);
+        setIsAuthenticated(false);
+        return false;
+      }
     } catch (error) {
       console.error("Error handling URL redirect:", error);
+      setIsAuthenticated(false);
       return false;
-    }
-  };
-
-  const handleManualTokenSubmit = async () => {
-    if (!manualToken.trim()) {
-      Alert.alert("Error", "Please enter a valid token");
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      // Save token
-      await AsyncStorage.setItem(AUTH_TOKEN_KEY, manualToken);
-
-      // Get and save user data
-      const userData = await authService.getCurrentUser();
-      setUser(userData);
-      await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
-
-      setTokenModalVisible(false);
-      setManualToken("");
-    } catch (error) {
-      console.error("Error authenticating with token:", error);
-      Alert.alert(
-        "Authentication Failed",
-        "The token is invalid. Please try again."
-      );
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -192,151 +163,260 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       setIsLoading(true);
 
-      // For iOS, use the IP address for better connectivity
-      console.log(
-        `Opening Google Auth URL: http://${SERVER_ADDRESS}:3000/api/auth/google`
+      // The redirect URI for your app
+      const redirectUri = "foodrecognition://auth";
+
+      // Use localhost for iOS simulator, IP for physical devices
+      const isIosSimulator = Platform.OS === "ios" && Platform.isPad === false;
+      const host = isIosSimulator ? "localhost" : "192.168.0.18";
+      const port = 3000;
+
+      // Ensure mobile=true is properly passed and encoded
+      const authUrl = `http://${host}:${port}/api/auth/google?mobile=true&redirect_uri=${encodeURIComponent(
+        redirectUri
+      )}`;
+
+      console.log(`Opening Google Auth URL: ${authUrl}`);
+
+      // Use openAuthSessionAsync for a better authentication flow
+      const result = await WebBrowser.openAuthSessionAsync(
+        authUrl,
+        redirectUri
       );
+      console.log("Auth session result:", JSON.stringify(result));
 
-      // Open the browser for authentication
-      const result = await WebBrowser.openBrowserAsync(
-        `http://${SERVER_ADDRESS}:3000/api/auth/google`
-      );
-
-      console.log("Browser result:", JSON.stringify(result, null, 2));
-
-      // In iOS simulator, show the token entry modal if auth was likely completed
-      if (result.type === "dismiss" || result.type === "cancel") {
-        // First check if the token was set via URL scheme
-        const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-        if (!token) {
-          // If no token was set, show the manual entry dialog
-          setTokenModalVisible(true);
-        } else {
-          // Token exists, try to load user data
-          try {
-            const userData = await authService.getCurrentUser();
-            setUser(userData);
-            await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
-            Alert.alert("Success", "You have been logged in successfully!");
-          } catch (error) {
-            console.error("Error loading user data:", error);
-            Alert.alert(
-              "Authentication Failed",
-              "Invalid or expired token. Please try again."
-            );
-            await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-          }
+      if (result.type === "success" && result.url) {
+        console.log("Successful auth redirect URL:", result.url);
+        const success = await handleUrlRedirect(result.url);
+        if (success) {
+          console.log("Successfully authenticated with Google");
+          // Successfully authenticated, now we can set the user as logged in
+          setIsAuthenticated(true);
+          return;
         }
+      } else if (result.type === "cancel") {
+        console.log("Authentication was cancelled by the user");
+        Alert.alert(
+          "Authentication Cancelled",
+          "You cancelled the Google sign-in process."
+        );
+        return;
       }
+
+      // If we get here, something went wrong
+      Alert.alert(
+        "Authentication Failed",
+        "Could not sign in with Google. Please try again or use email login."
+      );
     } catch (error) {
       console.error("Google sign in error:", error);
       Alert.alert(
-        "Authentication Failed",
-        "Could not connect to authentication server."
+        "Authentication Error",
+        "An error occurred while signing in with Google."
       );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Sign in with email and password
+  const signInWithEmail = async (
+    email: string,
+    password: string
+  ): Promise<boolean> => {
+    if (!email || !password) {
+      Alert.alert("Error", "Please enter both email and password");
+      return false;
+    }
+
+    try {
+      setIsLoading(true);
+      // Use our API login instead of Firebase
+      return await signIn(email, password);
+    } catch (error: any) {
+      console.error("Email sign in error:", error);
+      let message = "Failed to sign in";
+      Alert.alert("Authentication Failed", message);
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Create a new account with email and password
+  const createAccount = async (email: string, password: string) => {
+    if (!email || !password) {
+      Alert.alert("Error", "Please enter both email and password");
+      return;
+    }
+
+    if (password.length < 6) {
+      Alert.alert("Error", "Password must be at least 6 characters");
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // Register using our server API
+      const userData = {
+        email,
+        password,
+        firstName: "",
+        lastName: "",
+        phoneNumber: "",
+      };
+
+      const response = await authService.register(userData);
+      console.log("Created account for:", email);
+
+      // Log the user in
+      await signIn(email, password);
+    } catch (error: any) {
+      console.error("Account creation error:", error);
+      let message = "Failed to create account";
+
+      if (error.response?.status === 400) {
+        message = error.response.data.error || "Email already in use";
+      }
+
+      Alert.alert("Registration Failed", message);
     } finally {
       setIsLoading(false);
     }
   };
 
   const signOut = async () => {
-    setIsLoading(true);
-
     try {
-      // Clear local storage
-      await AsyncStorage.multiRemove([AUTH_TOKEN_KEY, USER_DATA_KEY]);
-      // Reset state
+      setIsLoading(true);
+
+      // Clear AsyncStorage
+      await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+      await AsyncStorage.removeItem(USER_DATA_KEY);
+
+      // Reset auth state
       setUser(null);
+      setIsAuthenticated(false);
+
+      console.log("User signed out successfully");
     } catch (error) {
-      console.error("Logout error:", error);
+      console.error("Error signing out:", error);
+      Alert.alert("Error", "Failed to sign out. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const signIn = async (email: string, password: string) => {
+    try {
+      setIsLoading(true);
+
+      // Call the login API
+      const response = await authService.login(email, password);
+
+      if (response.token) {
+        // Save the token
+        await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
+
+        // Set user data
+        setUser(response.user);
+        setIsAuthenticated(true);
+
+        // Save user data
+        await AsyncStorage.setItem(
+          USER_DATA_KEY,
+          JSON.stringify(response.user)
+        );
+
+        console.log("Successfully logged in with email:", email);
+        return true;
+      } else {
+        console.error("No token received from login");
+        Alert.alert("Login Failed", "Invalid credentials. Please try again.");
+        return false;
+      }
+    } catch (error: any) {
+      console.error("Login error:", error);
+
+      // Check if this is a Google-authenticated user trying to log in with password
+      if (error.response?.status === 400 && error.response?.data?.error) {
+        Alert.alert(
+          "Login Failed",
+          error.response.data.error || "Please use Google sign-in instead."
+        );
+      } else {
+        Alert.alert(
+          "Login Failed",
+          "Could not login with email and password. Please check your credentials and try again."
+        );
+      }
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Check for existing token and restore auth state
+  const checkExistingToken = async () => {
+    try {
+      setIsLoading(true);
+
+      // Check for token in AsyncStorage
+      const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+
+      if (token) {
+        console.log("Found existing token");
+
+        // Try to get user data with token
+        try {
+          const userData = await authService.getCurrentUser();
+          if (userData) {
+            console.log("Successfully restored user session");
+            setUser(userData);
+            setIsAuthenticated(true);
+            await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
+          } else {
+            // Clear invalid token
+            console.log("Invalid token - clearing storage");
+            await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+            await AsyncStorage.removeItem(USER_DATA_KEY);
+            setIsAuthenticated(false);
+          }
+        } catch (error) {
+          console.error("Error restoring session:", error);
+          // Clear invalid token
+          await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+          await AsyncStorage.removeItem(USER_DATA_KEY);
+          setIsAuthenticated(false);
+        }
+      } else {
+        console.log("No existing token found");
+        setIsAuthenticated(false);
+      }
+    } catch (error) {
+      console.error("Error checking for token:", error);
+      setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <>
-      <AuthContext.Provider
-        value={{
-          user,
-          isAuthenticated: !!user,
-          isLoading,
-          signInWithGoogle,
-          signOut,
-          handleUrlRedirect,
-        }}
-      >
-        {children}
-      </AuthContext.Provider>
-
-      {/* Token Entry Modal */}
-      <Modal
-        visible={tokenModalVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setTokenModalVisible(false)}
-      >
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <TextInput
-              style={styles.tokenInput}
-              placeholder="Paste your authentication token"
-              value={manualToken}
-              onChangeText={setManualToken}
-              multiline
-              numberOfLines={4}
-            />
-            <View style={styles.buttonRow}>
-              <Button
-                title="Cancel"
-                onPress={() => setTokenModalVisible(false)}
-              />
-              <Button title="Submit" onPress={handleManualTokenSubmit} />
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </>
+    <AuthContext.Provider
+      value={{
+        user,
+        isAuthenticated,
+        isLoading,
+        signInWithGoogle,
+        signInWithEmail,
+        createAccount,
+        signOut,
+        handleUrlRedirect,
+        signIn,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
   );
 };
-
-const styles = StyleSheet.create({
-  modalContainer: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-  },
-  modalContent: {
-    width: "80%",
-    backgroundColor: "white",
-    borderRadius: 10,
-    padding: 20,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  tokenInput: {
-    width: "100%",
-    borderWidth: 1,
-    borderColor: "#ccc",
-    borderRadius: 5,
-    padding: 10,
-    marginBottom: 20,
-    minHeight: 100,
-    textAlignVertical: "top",
-  },
-  buttonRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-  },
-});
 
 export const useAuth = () => useContext(AuthContext);

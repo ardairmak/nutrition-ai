@@ -1,6 +1,7 @@
 export type RootStackParamList = {
   Auth: undefined;
   Main: undefined;
+  AuthRedirect: { token?: string };
 };
 
 export type AuthStackParamList = {

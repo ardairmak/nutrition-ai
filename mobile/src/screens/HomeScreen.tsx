@@ -1,34 +1,66 @@
-import React from "react";
-import { View, Text, StyleSheet } from "react-native";
+import React, { useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+} from "react-native";
+import { useAuth } from "../contexts/AuthContext";
 
-export function HomeScreen() {
+export const HomeScreen = () => {
+  const { user, signOut, isLoading, isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    // For debugging
+    console.log("HomeScreen rendered with user:", user);
+    console.log("User authenticated:", isAuthenticated);
+  }, [user, isAuthenticated]);
+
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Welcome to Food Recognition App</Text>
-      <Text style={styles.subtitle}>
-        Track your meals and achieve your health goals
-      </Text>
+      {isLoading ? (
+        <ActivityIndicator size="large" color="#4285F4" />
+      ) : (
+        <>
+          <Text style={styles.title}>
+            Welcome, {user?.firstName || user?.email?.split("@")[0] || "User"}!
+          </Text>
+
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={signOut}
+            disabled={isLoading}
+          >
+            <Text style={styles.logoutButtonText}>Logout</Text>
+          </TouchableOpacity>
+        </>
+      )}
     </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
     padding: 20,
-    backgroundColor: "#fff",
   },
   title: {
     fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 10,
-    textAlign: "center",
+    marginBottom: 20,
   },
-  subtitle: {
+  logoutButton: {
+    backgroundColor: "#ff4444",
+    padding: 15,
+    borderRadius: 8,
+    width: "100%",
+    alignItems: "center",
+  },
+  logoutButtonText: {
+    color: "white",
     fontSize: 16,
-    color: "#666",
-    textAlign: "center",
+    fontWeight: "bold",
   },
 });

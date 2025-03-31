@@ -40,8 +40,6 @@ Thumbs.db
 web-build/
 
 # Native
-ios/
-android/
 *.orig.*
 *.jks
 *.p8
@@ -49,11 +47,6 @@ android/
 *.key
 *.mobileprovision
 *.orig.*
-
-# Firebase config
-GoogleService-Info.plist
-google-services.json
-firebase-credentials.json
 
 # Temporary files
 *.tmp

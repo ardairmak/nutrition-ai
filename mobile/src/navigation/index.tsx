@@ -9,10 +9,17 @@ import { useAuth } from "../contexts/AuthContext";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-// Temporary placeholder screen
-const PlaceholderScreen = () => null;
+// Auth screen to handle redirects
+const AuthRedirectScreen = () => {
+  const { isAuthenticated } = useAuth();
 
-export function Navigation() {
+  // This is just a placeholder for the deep link
+  // The actual logic is in the AuthContext's handleUrlRedirect
+
+  return null;
+};
+
+export function Navigation({ linking }: { linking?: any }) {
   const { isAuthenticated, isLoading } = useAuth();
 
   if (isLoading) {
@@ -25,14 +32,17 @@ export function Navigation() {
   }
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           // User is signed in
           <Stack.Screen name="Main" component={HomeScreen} />
         ) : (
           // User is not signed in
-          <Stack.Screen name="Auth" component={LoginScreen} />
+          <>
+            <Stack.Screen name="Auth" component={LoginScreen} />
+            <Stack.Screen name="AuthRedirect" component={AuthRedirectScreen} />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

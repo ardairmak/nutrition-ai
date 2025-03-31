@@ -1,8 +1,9 @@
 import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
-import prisma from "../config/prisma";
+import { prisma } from "../db";
 import { logger } from "../utils/logger";
+import { AuthRequest } from "../middleware/auth";
 
 // Register a new user
 export const registerUser = async (req: Request, res: Response) => {
@@ -242,5 +243,120 @@ export const updateUserProfile = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`Error updating user profile: ${error}`);
     return res.status(500).json({ error: "Failed to update user profile" });
+  }
+};
+
+// Get current user's profile
+export const getCurrentUser = async (req: Request, res: Response) => {
+  try {
+    // User ID is already attached to the request by the auth middleware
+    const userId = (req as AuthRequest).user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    // Get user data from database
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        isVerified: true,
+        profilePicture: true,
+        dateOfBirth: true,
+        gender: true,
+        height: true,
+        weight: true,
+        targetWeight: true,
+        activityLevel: true,
+        dietaryPreferences: true,
+        allergies: true,
+        dailyCalorieGoal: true,
+        createdAt: true,
+        lastLogin: true,
+        // Exclude sensitive data like passwordHash
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Return user data
+    return res.json(user);
+  } catch (error) {
+    logger.error(`Error getting current user: ${error}`);
+    return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// Update current user's profile
+export const updateUser = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as AuthRequest).user?.id;
+
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    // Extract fields from request body
+    const {
+      firstName,
+      lastName,
+      dateOfBirth,
+      gender,
+      height,
+      weight,
+      targetWeight,
+      activityLevel,
+      dietaryPreferences,
+      allergies,
+      dailyCalorieGoal,
+      profilePicture,
+    } = req.body;
+
+    // Update user in database
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        firstName,
+        lastName,
+        dateOfBirth,
+        gender,
+        height,
+        weight,
+        targetWeight,
+        activityLevel,
+        dietaryPreferences,
+        allergies,
+        dailyCalorieGoal,
+        profilePicture,
+        updatedAt: new Date(),
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        dateOfBirth: true,
+        gender: true,
+        height: true,
+        weight: true,
+        targetWeight: true,
+        activityLevel: true,
+        dietaryPreferences: true,
+        allergies: true,
+        dailyCalorieGoal: true,
+        profilePicture: true,
+      },
+    });
+
+    return res.json(updatedUser);
+  } catch (error) {
+    logger.error(`Error updating user: ${error}`);
+    return res.status(500).json({ error: "Server error" });
   }
 };

@@ -10,6 +10,8 @@ web-build/
 expo-env.d.ts
 
 # Native
+ios/
+android/
 *.orig.*
 *.jks
 *.p8
@@ -30,7 +32,30 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
 
 # typescript
 *.tsbuildinfo
+
+# Coverage directory used by tools like istanbul
+coverage/
+
+# Build directories
+build/
+out/
+
+# Firebase config files
+GoogleService-Info.plist
+google-services.json
+firebase-credentials.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Temp files
+*.tmp
+*.temp
