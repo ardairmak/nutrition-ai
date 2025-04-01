@@ -12,7 +12,7 @@ export interface AuthRequest extends Request {
 }
 
 // Middleware to authenticate JWT tokens
-export const authenticate = (
+export const authenticate = async (
   req: Request,
   res: Response,
   next: NextFunction
@@ -24,23 +24,47 @@ export const authenticate = (
     // Get token from header
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      logger.error("No token or incorrect format in Authorization header");
       return res.status(401).json({ error: "No token provided" });
     }
 
     // Extract token
     const token = authHeader.split(" ")[1];
     if (!token) {
+      logger.error("Empty token after Bearer prefix");
       return res.status(401).json({ error: "Invalid token format" });
     }
 
+    // Log token starting characters for debugging
+    logger.info(`Token received: ${token.substring(0, 20)}...`);
+
     // Verify token
-    const secretKey = process.env.JWT_SECRET || "fallback-secret-key";
+    // IMPORTANT: Use exactly the same secret as when generating tokens
+    const secretKey = process.env.JWT_SECRET;
+    if (!secretKey) {
+      logger.error("JWT_SECRET is not defined in environment variables");
+      return res.status(500).json({ error: "Server configuration error" });
+    }
 
     try {
+      // Log the token details for debugging
+      logger.info(
+        `Auth middleware processing token: ${token.substring(0, 10)}...`
+      );
+
       const decoded = jwt.verify(token, secretKey) as {
         id: string;
         email: string;
       };
+
+      if (!decoded || !decoded.id || !decoded.email) {
+        logger.error("Token payload missing required fields");
+        return res.status(401).json({ error: "Invalid token data" });
+      }
+
+      logger.info(
+        `JWT token decoded for ID: ${decoded.id}, email: ${decoded.email}`
+      );
 
       // Add user to request object
       authReq.user = {
@@ -48,23 +72,31 @@ export const authenticate = (
         email: decoded.email,
       };
 
-      // Check if user exists (asynchronously)
-      prisma.user
-        .findUnique({
+      // Check if user exists (now synchronously)
+      try {
+        const user = await prisma.user.findUnique({
           where: { id: decoded.id },
-        })
-        .then((user) => {
-          if (!user) {
-            logger.error(`User not found: ${decoded.id}`);
-            // Continue anyway since we already added user to request
-          }
-          next();
-        })
-        .catch((error) => {
-          logger.error(`Database error: ${error}`);
-          // Continue anyway since token is valid
-          next();
         });
+
+        if (!user) {
+          logger.error(`User not found for ID: ${decoded.id}`);
+          return res.status(401).json({ error: "User not found" });
+        }
+
+        // Verify email matches to prevent ID confusion
+        if (user.email !== decoded.email) {
+          logger.error(
+            `Email mismatch! Token: ${decoded.email}, DB: ${user.email}`
+          );
+          return res.status(401).json({ error: "Invalid token data" });
+        }
+
+        logger.info(`User authenticated: ${user.email} (${user.id})`);
+        next();
+      } catch (dbError) {
+        logger.error(`Database error: ${dbError}`);
+        return res.status(500).json({ error: "Server error" });
+      }
     } catch (jwtError) {
       logger.error(`JWT verification error: ${jwtError}`);
       return res.status(401).json({ error: "Invalid token" });

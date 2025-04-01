@@ -4,6 +4,28 @@ import jwt from "jsonwebtoken";
 import prisma from "../config/prisma";
 import { logger } from "../utils/logger";
 import { AuthRequest } from "../middleware/auth";
+import { sendVerificationEmail as sendEmail } from "../utils/emailService";
+
+// Helper function to generate JWT tokens consistently
+const generateJwtToken = (userId: string, userEmail: string): string => {
+  const secretKey = process.env.JWT_SECRET;
+  if (!secretKey) {
+    logger.error("JWT_SECRET is not defined in environment variables");
+    throw new Error("Server configuration error");
+  }
+
+  const token = jwt.sign(
+    {
+      id: userId,
+      email: userEmail,
+    },
+    secretKey
+  );
+
+  logger.info(`Generated JWT token for: ${userEmail} (${userId})`);
+  logger.info(`Token length: ${token.length} characters`);
+  return token;
+};
 
 // Login user
 export const loginUser = async (req: Request, res: Response) => {
@@ -39,15 +61,18 @@ export const loginUser = async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // Create JWT token
-    const secretKey = process.env.JWT_SECRET || "fallback-secret-key";
-    const token = jwt.sign(
-      {
-        id: user.id,
+    // Check if user is verified
+    if (!user.isVerified) {
+      logger.info(`Unverified user attempted login: ${user.id}`);
+      return res.status(403).json({
+        error: "Account not verified. Please verify your email to continue.",
+        requiresVerification: true,
         email: user.email,
-      },
-      secretKey
-    );
+      });
+    }
+
+    // Create JWT token
+    const token = generateJwtToken(user.id, user.email);
 
     // Update last login
     await prisma.user.update({
@@ -67,6 +92,7 @@ export const loginUser = async (req: Request, res: Response) => {
         lastName: user.lastName,
         isVerified: user.isVerified,
         profilePicture: user.profilePicture,
+        profileSetupComplete: user.profileSetupComplete || false,
       },
     });
   } catch (error) {
@@ -86,18 +112,24 @@ export const googleAuthCallback = (req: Request, res: Response) => {
       );
     }
 
-    // Log success
-    logger.info(`User authenticated via Google: ${(req.user as any).email}`);
+    const authUser = req.user as { id: string; email: string };
 
-    // Create JWT token
-    const secretKey = process.env.JWT_SECRET || "fallback-secret-key";
-    const token = jwt.sign(
-      {
-        id: (req.user as { id: string }).id,
-        email: (req.user as { email: string }).email,
-      },
-      secretKey
+    // Log detailed information about the authenticated user
+    logger.info(
+      `Google auth callback for user: ${authUser.email} (${authUser.id})`
     );
+    logger.info(`User object from request: ${JSON.stringify(req.user)}`);
+
+    // Create JWT token using our helper function
+    const token = generateJwtToken(authUser.id, authUser.email);
+
+    // Ensure token doesn't have any invalid characters
+    if (!token) {
+      logger.error("Failed to generate JWT token for user");
+      return res.redirect(
+        `${process.env.CLIENT_URL}/auth?error=Token generation failed`
+      );
+    }
 
     // Get mobile flag and redirect URI from session or query
     const mobileFlag =
@@ -120,9 +152,11 @@ export const googleAuthCallback = (req: Request, res: Response) => {
       (redirectUri.startsWith("foodrecognition://") ||
         redirectUri.startsWith("exp://"))
     ) {
+      // Ensure no fragment character is included in the redirect URL
+      const cleanToken = token.replace(/#/g, "");
       const redirectUrl = redirectUri.includes("?")
-        ? `${redirectUri}&token=${token}`
-        : `${redirectUri}?token=${token}`;
+        ? `${redirectUri}&token=${cleanToken}`
+        : `${redirectUri}?token=${cleanToken}`;
 
       logger.info(`Redirecting to app with custom scheme: ${redirectUrl}`);
       return res.redirect(redirectUrl);
@@ -298,17 +332,18 @@ export const googleAuthentication = async (req: Request, res: Response) => {
         data: {
           email,
           googleId,
-          firstName,
-          lastName,
+          firstName: firstName || email.split("@")[0], // Fallback to email username if no name
+          lastName: lastName || "", // Empty string instead of null
           profilePicture: picture,
           isVerified: true, // Google has already verified the email
           lastLogin: new Date(),
+          profileSetupComplete: false, // Set explicitly to false for onboarding
         },
       });
 
       logger.info(`New user created from Google auth: ${user.id}`);
     } else {
-      // Update existing user
+      // Update existing user but don't modify firstName, lastName, or profileSetupComplete
       user = await prisma.user.update({
         where: { id: user.id },
         data: {
@@ -321,9 +356,8 @@ export const googleAuthentication = async (req: Request, res: Response) => {
       logger.info(`Existing user logged in via Google: ${user.id}`);
     }
 
-    // Generate JWT token
-    const secretKey = process.env.JWT_SECRET || "fallback-secret-key";
-    const token = jwt.sign({ id: user.id, email: user.email }, secretKey);
+    // Generate JWT token with our helper function
+    const token = generateJwtToken(user.id, user.email);
 
     // Return user info and token
     return res.status(200).json({
@@ -335,6 +369,7 @@ export const googleAuthentication = async (req: Request, res: Response) => {
         firstName: user.firstName,
         lastName: user.lastName,
         profilePicture: user.profilePicture,
+        profileSetupComplete: user.profileSetupComplete || false,
       },
     });
   } catch (error) {
@@ -345,12 +380,16 @@ export const googleAuthentication = async (req: Request, res: Response) => {
   }
 };
 
-// Send email verification code
+// Send verification email
 export const sendVerificationEmail = async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
 
-    // Check if user exists
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    // Find user
     const user = await prisma.user.findUnique({
       where: { email },
     });
@@ -359,18 +398,21 @@ export const sendVerificationEmail = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Check if user is already verified
+    // Check if already verified
     if (user.isVerified) {
-      return res.status(400).json({ error: "User is already verified" });
+      return res.status(400).json({ error: "Account already verified" });
     }
 
-    // Generate verification code
+    // Generate new verification code
     const verificationCode = Math.floor(
       100000 + Math.random() * 900000
     ).toString();
-    const verificationExpiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
 
-    // Update user with verification code
+    // Set expiration time (24 hours)
+    const verificationExpiresAt = new Date();
+    verificationExpiresAt.setHours(verificationExpiresAt.getHours() + 24);
+
+    // Update user with new code
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -379,17 +421,22 @@ export const sendVerificationEmail = async (req: Request, res: Response) => {
       },
     });
 
-    // In a real app, you would send an email here with nodemailer or a service like SendGrid
-    // For now, just log the code and return it in the response (for testing)
-    logger.info(`Verification code for ${email}: ${verificationCode}`);
+    // Send email with verification code
+    const emailSent = await sendEmail(email, verificationCode);
 
-    return res.status(200).json({
-      message: "Verification code sent to your email",
-      // Remove in production, just for testing
-      verificationCode,
-    });
+    if (!emailSent) {
+      logger.warn(`Failed to send verification email to: ${email}`);
+      return res.status(500).json({
+        error: "Failed to send verification email",
+        message:
+          "Server could not send the verification email. Please try again later.",
+      });
+    }
+
+    logger.info(`Verification email sent to: ${email}`);
+    return res.status(200).json({ message: "Verification email sent" });
   } catch (error) {
-    logger.error(`Error sending verification email: ${error}`);
+    logger.error("Error sending verification email:", error);
     return res.status(500).json({ error: "Failed to send verification email" });
   }
 };
