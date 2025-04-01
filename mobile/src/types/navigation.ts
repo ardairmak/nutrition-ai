@@ -1,7 +1,9 @@
 export type RootStackParamList = {
-  Auth: undefined;
-  Main: undefined;
-  AuthRedirect: { token?: string };
+  Login: undefined;
+  Home: undefined;
+  Verification: {
+    email: string;
+  };
 };
 
 export type AuthStackParamList = {
