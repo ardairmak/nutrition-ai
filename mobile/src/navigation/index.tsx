@@ -2,9 +2,12 @@ import React from "react";
 import { ActivityIndicator, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { RootStackParamList } from "../types/navigation";
+import { RootStackParamList } from "./types";
 import { HomeScreen } from "../screens/HomeScreen";
 import { LoginScreen } from "../screens/LoginScreen";
+import { VerificationScreen } from "../screens/VerificationScreen";
+import { OnboardingScreen } from "../screens/OnboardingScreen";
+import { OnboardingNameScreen } from "../screens/OnboardingNameScreen";
 import { useAuth } from "../contexts/AuthContext";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -20,7 +23,7 @@ const AuthRedirectScreen = () => {
 };
 
 export function Navigation({ linking }: { linking?: any }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
 
   if (isLoading) {
     // Show loading screen while checking authentication status
@@ -36,11 +39,29 @@ export function Navigation({ linking }: { linking?: any }) {
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isAuthenticated ? (
           // User is signed in
-          <Stack.Screen name="Main" component={HomeScreen} />
+          user && user.profileSetupComplete !== true ? (
+            // Show onboarding if profile is not complete
+            // This handles both false and undefined values
+            <>
+              <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+              <Stack.Screen
+                name="OnboardingName"
+                component={OnboardingNameScreen}
+              />
+              {/* Add other onboarding screens here */}
+              {/* <Stack.Screen name="OnboardingStats" component={OnboardingStatsScreen} />
+              <Stack.Screen name="OnboardingDiet" component={OnboardingDietScreen} />
+              <Stack.Screen name="OnboardingGoals" component={OnboardingGoalsScreen} /> */}
+            </>
+          ) : (
+            // Show main app
+            <Stack.Screen name="Home" component={HomeScreen} />
+          )
         ) : (
           // User is not signed in
           <>
-            <Stack.Screen name="Auth" component={LoginScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Verification" component={VerificationScreen} />
             <Stack.Screen name="AuthRedirect" component={AuthRedirectScreen} />
           </>
         )}

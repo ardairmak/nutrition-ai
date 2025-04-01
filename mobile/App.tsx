@@ -20,9 +20,9 @@ const linking: LinkingOptions<RootStackParamList> = {
   prefixes: [prefix, "foodrecognition://", "exp://"],
   config: {
     screens: {
-      Auth: "auth",
-      Main: "home",
-      AuthRedirect: "auth/redirect/:token?",
+      Login: "login",
+      Home: "home",
+      Verification: "verify/:email",
     },
   },
   // Debug linking
