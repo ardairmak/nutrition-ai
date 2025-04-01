@@ -35,6 +35,7 @@ passport.use(
               dietaryPreferences: [],
               allergies: [],
               googleId: profile.id, // Set Google ID
+              profileSetupComplete: false, // Force new users to go through onboarding
             },
           });
 
@@ -42,18 +43,12 @@ passport.use(
             `New user created via Google OAuth: ${user.id} with Google ID: ${profile.id}`
           );
         } else {
-          // Update existing user with latest Google profile data
+          // Update existing user with Google ID but don't override name/profile data
           user = await prisma.user.update({
             where: {
               id: user.id,
             },
             data: {
-              firstName:
-                profile.name?.givenName ||
-                profile.displayName ||
-                user.firstName,
-              lastName: profile.name?.familyName || user.lastName,
-              profilePicture: profile.photos?.[0]?.value || user.profilePicture,
               isVerified: true,
               lastLogin: new Date(),
               googleId: profile.id, // Set Google ID if not already set
