@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { authService } from "../services/api";
+import authService from "../services/authService";
+import userService from "../services/userService";
 import * as WebBrowser from "expo-web-browser";
 import { Alert, Linking, Platform } from "react-native";
 
@@ -10,7 +11,10 @@ type User = {
   firstName: string | null;
   lastName: string | null;
   profilePicture: string | null;
+  profileSetupComplete: boolean;
 };
+
+type SignInResult = boolean | { requiresVerification: boolean; email: string };
 
 type AuthContextData = {
   user: User | null;
@@ -21,7 +25,9 @@ type AuthContextData = {
   createAccount: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   handleUrlRedirect: (url: string) => Promise<boolean>;
-  signIn: (email: string, password: string) => Promise<boolean>;
+  signIn: (email: string, password: string) => Promise<SignInResult>;
+  setUser: (user: User | null) => void;
+  setIsAuthenticated: (value: boolean) => void;
 };
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
@@ -115,32 +121,107 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         }
       }
 
-      // Clean the token - remove any trailing hash or fragment
-      if (token && token.includes("#")) {
-        token = token.split("#")[0];
-      }
-
       // Process the token if found
       if (token) {
         console.log("Found token in URL, saving cleaned token");
 
-        // Save token
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+        // Clean the token - remove any trailing hash or fragment
+        if (token.includes("#")) {
+          console.log("Token contains # fragment, cleaning it");
+          token = token.split("#")[0];
+        }
+
+        // Log the final token (with some characters hidden for security)
+        const tokenLength = token.length;
+        console.log(
+          `Cleaned token: ${token.substring(0, 10)}...${token.substring(
+            tokenLength - 10
+          )} (${tokenLength} chars)`
+        );
+
+        // Validate token before proceeding
+        const { valid, payload } = authService.validateToken(token);
+        if (!valid) {
+          console.error("Invalid token received from server");
+          Alert.alert(
+            "Authentication Error",
+            "Invalid authentication token received. Please try again."
+          );
+          return false;
+        }
+
+        console.log(`Token validated for: ${payload.email} (${payload.id})`);
+
+        // First, clear all auth state completely
+        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        await AsyncStorage.removeItem(USER_DATA_KEY);
+        setUser(null);
+        setIsAuthenticated(false);
+
+        console.log("Completely cleared auth state before Google login");
+
+        // Wait a moment for AsyncStorage to complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Save token directly
+        try {
+          console.log("Saving token to AsyncStorage...");
+          await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+          console.log(`Token saved (${token.length} chars)`);
+        } catch (storageError) {
+          console.error("AsyncStorage error:", storageError);
+          Alert.alert("Login Error", "Could not save login credentials");
+          return false;
+        }
 
         // Get and store user data
         try {
-          const userData = await authService.getCurrentUser();
-          if (userData) {
-            console.log("Successfully retrieved user data");
-            setUser(userData);
-            setIsAuthenticated(true);
-            await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
-            return true;
-          } else {
-            console.error("Got null user data with valid token");
-            setIsAuthenticated(false);
+          console.log("Getting user data with token...");
+
+          // Pass the token directly to avoid AsyncStorage race condition
+          console.log(
+            `Using direct token pass instead of AsyncStorage retrieval`
+          );
+
+          // Call getCurrentUser with the token directly
+          const response = await authService.getCurrentUserWithToken(token);
+
+          if (!response.success) {
+            // Handle the error case explicitly
+            console.error("Failed to get user data:", response.error);
+            Alert.alert(
+              "Authentication Error",
+              `Could not retrieve your account information: ${response.error}`
+            );
             return false;
           }
+
+          if (!response.user) {
+            console.error("Success response but no user data!");
+            Alert.alert(
+              "Authentication Error",
+              "Your account information appears to be missing"
+            );
+            return false;
+          }
+
+          console.log(
+            "Successfully retrieved user data from Google auth:",
+            JSON.stringify(response.user)
+          );
+
+          // Set user directly (no timeout needed now that we've waited)
+          setUser(response.user);
+          setIsAuthenticated(true);
+
+          // Store in AsyncStorage only after state is set
+          await AsyncStorage.setItem(
+            USER_DATA_KEY,
+            JSON.stringify(response.user)
+          );
+
+          console.log("Google login complete, user data stored");
+          return true;
         } catch (userError) {
           console.error("Error getting user data:", userError);
           await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
@@ -231,8 +312,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
     try {
       setIsLoading(true);
-      // Use our API login instead of Firebase
-      return await signIn(email, password);
+      // Use our new signIn function
+      const result = await signIn(email, password);
+      // If result is true, login was successful
+      return result === true;
     } catch (error: any) {
       console.error("Email sign in error:", error);
       let message = "Failed to sign in";
@@ -306,32 +389,87 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   };
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (
+    email: string,
+    password: string
+  ): Promise<SignInResult> => {
     try {
       setIsLoading(true);
+      console.log("Logging in with email:", email);
 
-      // Call the login API
-      const response = await authService.login(email, password);
+      // Use our custom authService
+      const response = await authService.signIn(email, password);
 
-      if (response.token) {
-        // Save the token
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
+      if (response.success && response.token) {
+        // First, clear all auth state completely
+        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        await AsyncStorage.removeItem(USER_DATA_KEY);
+        setUser(null);
+        setIsAuthenticated(false);
 
-        // Set user data
-        setUser(response.user);
-        setIsAuthenticated(true);
+        console.log("Completely cleared auth state before manual login");
 
-        // Save user data
-        await AsyncStorage.setItem(
-          USER_DATA_KEY,
-          JSON.stringify(response.user)
+        // Wait a moment for AsyncStorage to complete
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        // Save the token directly
+        try {
+          await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
+        } catch (storageError) {
+          console.error("AsyncStorage error:", storageError);
+          Alert.alert("Login Error", "Could not save login credentials");
+          return false;
+        }
+
+        // Get user data using direct token approach
+        console.log("Getting user data with token directly...");
+        const userResponse = await authService.getCurrentUserWithToken(
+          response.token
         );
 
-        console.log("Successfully logged in with email:", email);
+        if (!userResponse.success || !userResponse.user) {
+          console.error(
+            "Failed to get user data during manual login:",
+            userResponse.error
+          );
+          Alert.alert(
+            "Login Error",
+            "Failed to retrieve your account information."
+          );
+          return false;
+        }
+
+        // Set user directly
+        setUser(userResponse.user);
+        setIsAuthenticated(true);
+
+        // Store in AsyncStorage only after state is set
+        await AsyncStorage.setItem(
+          USER_DATA_KEY,
+          JSON.stringify(userResponse.user)
+        );
+
+        console.log(
+          "Manual login complete, user data stored:",
+          userResponse.user.email
+        );
         return true;
       } else {
-        console.error("No token received from login");
-        Alert.alert("Login Failed", "Invalid credentials. Please try again.");
+        // Handle verification required case
+        if (response.requiresVerification) {
+          console.log("Account requires verification:", email);
+          Alert.alert(
+            "Verification Required",
+            "Your account needs to be verified. Please check your email for verification code or request a new one."
+          );
+          return { requiresVerification: true, email: response.email };
+        }
+
+        console.error("Login failed:", response.error);
+        Alert.alert(
+          "Login Failed",
+          response.error || "Invalid credentials. Please try again."
+        );
         return false;
       }
     } catch (error: any) {
@@ -359,42 +497,90 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const checkExistingToken = async () => {
     try {
       setIsLoading(true);
+      console.log("Checking for existing authentication token...");
+
+      // Reset state first
+      setUser(null);
+      setIsAuthenticated(false);
 
       // Check for token in AsyncStorage
       const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+      const storedUserData = await AsyncStorage.getItem(USER_DATA_KEY);
 
-      if (token) {
-        console.log("Found existing token");
+      if (!token) {
+        console.log("No token found, user is not authenticated");
+        setIsLoading(false);
+        return;
+      }
 
-        // Try to get user data with token
-        try {
-          const userData = await authService.getCurrentUser();
-          if (userData) {
-            console.log("Successfully restored user session");
-            setUser(userData);
-            setIsAuthenticated(true);
-            await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
-          } else {
-            // Clear invalid token
-            console.log("Invalid token - clearing storage");
-            await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-            await AsyncStorage.removeItem(USER_DATA_KEY);
-            setIsAuthenticated(false);
-          }
-        } catch (error) {
-          console.error("Error restoring session:", error);
-          // Clear invalid token
+      console.log("Found existing token, validating with server...");
+
+      // Try to get user data with token from API
+      try {
+        const response = await authService.getCurrentUser();
+
+        // Handle user mismatch error - force full logout
+        if (!response.success && response.mismatch) {
+          console.error("USER DATA MISMATCH DETECTED! Forcing logout.");
+          console.error(`Expected user from token: ${response.tokenEmail}`);
+          console.error(`Got user from server: ${response.dataEmail}`);
+
+          // Clear everything
           await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
           await AsyncStorage.removeItem(USER_DATA_KEY);
+          setUser(null);
           setIsAuthenticated(false);
+
+          Alert.alert(
+            "Authentication Error",
+            "Your login session has expired or is invalid. Please log in again.",
+            [{ text: "OK" }]
+          );
+
+          setIsLoading(false);
+          return;
         }
-      } else {
-        console.log("No existing token found");
-        setIsAuthenticated(false);
+
+        if (!response.success || !response.user) {
+          console.log("Invalid token - clearing storage");
+          await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+          await AsyncStorage.removeItem(USER_DATA_KEY);
+          setIsLoading(false);
+          return;
+        }
+
+        console.log("User data from API:", JSON.stringify(response.user));
+
+        // Check and update profile status for existing users
+        const profileStatus = await userService.ensureProfileStatus();
+        console.log("Profile status response:", JSON.stringify(profileStatus));
+
+        // Use API data, with profile status updates if available
+        const userData =
+          profileStatus.success && profileStatus.user
+            ? profileStatus.user
+            : response.user;
+
+        console.log("Final user data being set:", JSON.stringify(userData));
+
+        // Set user and authentication state
+        setUser(userData);
+        setIsAuthenticated(true);
+
+        // Save updated user data to storage
+        await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
+
+        console.log("Session restored successfully for:", userData.email);
+      } catch (error) {
+        console.error("Error restoring session:", error);
+        // Clear invalid token
+        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        await AsyncStorage.removeItem(USER_DATA_KEY);
       }
     } catch (error) {
       console.error("Error checking for token:", error);
-      setIsAuthenticated(false);
+      await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+      await AsyncStorage.removeItem(USER_DATA_KEY);
     } finally {
       setIsLoading(false);
     }
@@ -412,6 +598,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         signOut,
         handleUrlRedirect,
         signIn,
+        setUser,
+        setIsAuthenticated,
       }}
     >
       {children}
