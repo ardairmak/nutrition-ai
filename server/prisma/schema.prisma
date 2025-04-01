@@ -15,8 +15,8 @@ model User {
     email                 String               @unique
     passwordHash          String?
     googleId              String?              @unique
-    firstName             String
-    lastName              String
+    firstName             String?
+    lastName              String?
     dateOfBirth           DateTime?
     gender                String?
     height                Float?
@@ -37,6 +37,7 @@ model User {
     updatedAt             DateTime             @updatedAt
     lastLogin             DateTime?
     profilePicture        String?
+    profileSetupComplete  Boolean              @default(false)
     mealEntries           MealEntry[]
     weightHistory         WeightHistory[]
     friendsInitiated      UserFriend[]         @relation("UserFriends")
