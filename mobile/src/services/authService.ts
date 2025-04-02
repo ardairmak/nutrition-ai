@@ -1,6 +1,10 @@
 import { API_URL } from "../config";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { AUTH_TOKEN_KEY } from "../constants";
+import { AUTH_TOKEN_KEY, USER_DATA_KEY } from "../constants";
+import { apiCall } from "./api"; // Import the apiCall helper
+
+// Helper to get user-specific token key
+const getAuthTokenKey = (email: string) => `@auth_token_${email.toLowerCase()}`;
 
 interface ApiResponse {
   success: boolean;
@@ -9,39 +13,43 @@ interface ApiResponse {
   [key: string]: any;
 }
 
+interface LoginResponse extends ApiResponse {
+  token?: string;
+  user?: any; // Add other expected fields from the login response
+}
+
 const authService = {
   /**
    * Sign in with email and password
    */
   signIn: async (email: string, password: string): Promise<ApiResponse> => {
     try {
-      const response = await fetch(`${API_URL}/auth/login`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
+      // Use apiCall helper
+      const response: LoginResponse = await apiCall(
+        "/auth/login",
+        "POST",
+        { email, password },
+        false
+      );
 
-      const data = await response.json();
-
-      if (response.ok) {
-        // Save token
-        if (data.token) {
-          await AsyncStorage.setItem(AUTH_TOKEN_KEY, data.token);
+      // Check if the response was successful and contains a token
+      if (response.success && response.token) {
+        // Now TypeScript knows response might have a token if success is true
+        const token = response.token;
+        await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+        if (email) {
+          await AsyncStorage.setItem(getAuthTokenKey(email), token);
+          console.log(`Token saved to user-specific key for ${email}`);
         }
-        return { success: true, ...data };
       }
 
-      return {
-        success: false,
-        error: data.error || "Authentication failed",
-        requiresVerification: data.requiresVerification || false,
-        email: data.email,
-      };
+      return response;
     } catch (error) {
       console.error("Sign in error:", error);
-      return { success: false, error: "Network error. Please try again." };
+      return {
+        success: false,
+        error: "Network error or unexpected issue during sign in.",
+      };
     }
   },
 
@@ -49,205 +57,124 @@ const authService = {
    * Register a new user account
    */
   register: async (userData: any): Promise<ApiResponse> => {
-    try {
-      const response = await fetch(`${API_URL}/auth/register`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(userData),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        return { success: true, ...data };
-      }
-
-      return { success: false, error: data.error || "Registration failed" };
-    } catch (error) {
-      console.error("Registration error:", error);
-      return { success: false, error: "Network error. Please try again." };
-    }
+    return apiCall("/auth/register", "POST", userData, false);
   },
 
   /**
    * Send a verification email
    */
   sendVerificationEmail: async (email: string): Promise<ApiResponse> => {
-    try {
-      const response = await fetch(`${API_URL}/auth/verify/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        return {
-          success: true,
-          message: data.message || "Verification email sent",
-        };
-      }
-
-      return {
-        success: false,
-        error: data.error || "Failed to send verification email",
-      };
-    } catch (error) {
-      console.error("Send verification error:", error);
-      return { success: false, error: "Network error. Please try again." };
-    }
+    return apiCall("/auth/verify/send", "POST", { email }, false);
   },
 
   /**
    * Verify email with code
    */
   verifyEmail: async (email: string, code: string): Promise<ApiResponse> => {
-    try {
-      const response = await fetch(`${API_URL}/auth/verify`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, code }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        return {
-          success: true,
-          message: data.message || "Email verified successfully",
-        };
-      }
-
-      return { success: false, error: data.error || "Verification failed" };
-    } catch (error) {
-      console.error("Verification error:", error);
-      return { success: false, error: "Network error. Please try again." };
-    }
+    return apiCall("/auth/verify", "POST", { email, code }, false);
   },
 
   /**
    * Sign out the current user
    */
   signOut: async (): Promise<void> => {
-    await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+    try {
+      console.log("AuthService: Signing out...");
+
+      // First, clear the generic token
+      await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+
+      // Get all keys
+      const allKeys = await AsyncStorage.getAllKeys();
+
+      // Find and remove all auth tokens
+      const authTokenKeys = allKeys.filter((key) =>
+        key.startsWith("@auth_token_")
+      );
+
+      if (authTokenKeys.length > 0) {
+        console.log(
+          `AuthService: Clearing ${authTokenKeys.length} user-specific tokens`
+        );
+        await AsyncStorage.multiRemove(authTokenKeys);
+      }
+
+      console.log("AuthService: Sign out complete");
+    } catch (error) {
+      console.error("AuthService: Error during sign out:", error);
+      // Don't throw, just log the error for sign out
+    }
   },
 
-  // Validate a JWT token
+  // Validate a JWT token (client-side basic check)
   validateToken: (token: string): { valid: boolean; payload?: any } => {
     try {
-      // Basic structure validation
       if (!token || !token.includes(".") || token.split(".").length !== 3) {
-        console.error("Invalid token structure");
         return { valid: false };
       }
-
-      // Parse the payload (middle part)
       const payload = JSON.parse(atob(token.split(".")[1]));
-
-      // Check for required fields
       if (!payload.id || !payload.email) {
-        console.error("Token missing required fields");
         return { valid: false };
       }
-
-      // Log valid token info
-      console.log(`Token validated for user: ${payload.email} (${payload.id})`);
       return { valid: true, payload };
     } catch (error) {
-      console.error("Error validating token:", error);
       return { valid: false };
     }
   },
 
   /**
-   * Get current user details (using stored token)
-   * @deprecated Use getCurrentUserWithToken when possible to avoid race conditions
-   */
-  getCurrentUser: async (): Promise<ApiResponse> => {
-    try {
-      console.log("Getting token from storage...");
-      const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-
-      if (!token) {
-        console.warn("No token found in AsyncStorage");
-        return { success: false, error: "No authentication token found" };
-      }
-
-      // Use the direct token method to avoid duplicating code
-      return authService.getCurrentUserWithToken(token);
-    } catch (error) {
-      console.error("Error in getCurrentUser:", error);
-      return {
-        success: false,
-        error: "Error accessing secure storage",
-      };
-    }
-  },
-
-  /**
    * Get current user details with direct token input
-   * (Avoids AsyncStorage race conditions)
    */
   getCurrentUserWithToken: async (token: string): Promise<ApiResponse> => {
     if (!token) {
-      console.error("No token provided");
       return { success: false, error: "No authentication token provided" };
     }
 
-    // Log token info (truncated for security)
-    const tokenLength = token.length;
-    const tokenPreview =
-      token.substring(0, 10) + "..." + token.substring(tokenLength - 5);
-    console.log(`Using token: ${tokenPreview} (${tokenLength} chars)`);
-
     try {
-      // Make API request
-      console.log(`Making request to ${API_URL}/users/me`);
-      const response = await fetch(`${API_URL}/users/me`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
+      console.log(`Making request to /users/me with direct token`);
+
+      // Create a custom fetch implementation that uses the provided token
+      const customFetch = async (url: string, options: RequestInit = {}) => {
+        const headers = {
+          ...options.headers,
           Authorization: `Bearer ${token}`,
-        },
-      });
-
-      console.log(`Response status: ${response.status}`);
-
-      // Handle response status
-      if (response.status === 401) {
-        console.warn("Token is invalid (401)");
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-        return {
-          success: false,
-          error: "Authentication expired",
+          "Content-Type": "application/json",
         };
-      }
 
-      // Parse response
-      const data = await response.json();
+        const response = await fetch(url, {
+          ...options,
+          headers,
+        });
 
-      if (response.ok && data) {
-        console.log(`Got user data: ${data.email}`);
-        return { success: true, user: data };
-      } else {
-        console.error("API error:", data.error);
-        return {
-          success: false,
-          error: data.error || "Failed to get user data",
-        };
-      }
+        const text = await response.text();
+        let data = {};
+
+        try {
+          if (text) {
+            data = JSON.parse(text);
+          }
+        } catch (error) {
+          console.error("Error parsing response:", error);
+          return { success: false, error: "Invalid server response" };
+        }
+
+        if (response.ok) {
+          return { success: true, user: data };
+        } else {
+          return {
+            success: false,
+            error: (data as any)?.error || "Failed to get user data",
+          };
+        }
+      };
+
+      // Make the request with our custom fetch
+      return await customFetch(`${API_URL}/users/me`);
     } catch (error) {
-      console.error("Network error:", error);
+      console.error("Error in getCurrentUserWithToken:", error);
       return {
         success: false,
-        error: "Network error",
+        error: "Network error or unexpected error fetching user data",
       };
     }
   },
