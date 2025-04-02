@@ -4,6 +4,10 @@ import authService from "../services/authService";
 import userService from "../services/userService";
 import * as WebBrowser from "expo-web-browser";
 import { Alert, Linking, Platform } from "react-native";
+import {
+  AUTH_TOKEN_KEY,
+  USER_DATA_KEY as GLOBAL_USER_DATA_KEY,
+} from "../constants";
 
 type User = {
   id: string;
@@ -12,6 +16,14 @@ type User = {
   lastName: string | null;
   profilePicture: string | null;
   profileSetupComplete: boolean;
+  fitnessGoals?: string[];
+  height?: number;
+  weight?: number;
+  gender?: string;
+  dateOfBirth?: string;
+  activityLevel?: string;
+  dietaryPreferences?: string[];
+  provider?: string; // 'google', 'email', etc.
 };
 
 type SignInResult = boolean | { requiresVerification: boolean; email: string };
@@ -39,9 +51,36 @@ WebBrowser.maybeCompleteAuthSession();
 const SERVER_ADDRESS =
   Platform.OS === "ios" && !Platform.isPad ? "localhost" : "192.168.0.18";
 
-// Storage keys
-const AUTH_TOKEN_KEY = "@auth_token";
-const USER_DATA_KEY = "@user_data";
+// Storage keys - make them user-specific to prevent token mixups
+const getAuthTokenKey = (email: string) => `@auth_token_${email.toLowerCase()}`;
+const getUserDataKey = (email: string) => `@user_data_${email.toLowerCase()}`;
+
+// Generic keys for fallback and logout operations
+const USER_DATA_KEY = GLOBAL_USER_DATA_KEY;
+
+// Function to clear all auth data for secure logout
+const clearAllAuthData = async () => {
+  try {
+    // Clear generic keys
+    await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+    await AsyncStorage.removeItem(USER_DATA_KEY);
+
+    // Get all keys
+    const allKeys = await AsyncStorage.getAllKeys();
+
+    // Find and remove all auth tokens and user data
+    const authKeys = allKeys.filter(
+      (key) => key.startsWith("@auth_token_") || key.startsWith("@user_data_")
+    );
+
+    if (authKeys.length > 0) {
+      await AsyncStorage.multiRemove(authKeys);
+      console.log(`Cleared ${authKeys.length} auth-related keys`);
+    }
+  } catch (error) {
+    console.error("Failed to clear auth data:", error);
+  }
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -141,7 +180,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
         // Validate token before proceeding
         const { valid, payload } = authService.validateToken(token);
-        if (!valid) {
+        if (!valid || !payload || !payload.email) {
           console.error("Invalid token received from server");
           Alert.alert(
             "Authentication Error",
@@ -152,9 +191,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
         console.log(`Token validated for: ${payload.email} (${payload.id})`);
 
+        // Use email from token payload for storage keys
+        const userEmail = payload.email;
+
         // First, clear all auth state completely
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-        await AsyncStorage.removeItem(USER_DATA_KEY);
+        await clearAllAuthData();
         setUser(null);
         setIsAuthenticated(false);
 
@@ -166,7 +207,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         // Save token directly
         try {
           console.log("Saving token to AsyncStorage...");
-          await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
+          await AsyncStorage.setItem(getAuthTokenKey(userEmail), token);
+          await AsyncStorage.setItem(AUTH_TOKEN_KEY, token); // Also save to generic key as backup
           console.log(`Token saved (${token.length} chars)`);
         } catch (storageError) {
           console.error("AsyncStorage error:", storageError);
@@ -210,21 +252,55 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             JSON.stringify(response.user)
           );
 
-          // Set user directly (no timeout needed now that we've waited)
-          setUser(response.user);
+          // For Google login users, check if they need to complete onboarding
+          let userData = response.user;
+
+          // Force a fresh profile check to get the most up-to-date data
+          console.log(
+            "Forcing a fresh profile check from server for Google login"
+          );
+          const freshProfileCheck = await userService.getProfile();
+
+          if (freshProfileCheck.success && freshProfileCheck.user) {
+            // Update userData with the most current server data
+            userData = {
+              ...userData,
+              fitnessGoals: freshProfileCheck.user.fitnessGoals || [],
+              dietaryPreferences:
+                freshProfileCheck.user.dietaryPreferences || [],
+              activityLevel: freshProfileCheck.user.activityLevel,
+              height: freshProfileCheck.user.height,
+              weight: freshProfileCheck.user.weight,
+              profileSetupComplete: freshProfileCheck.user.profileSetupComplete,
+            };
+          } else {
+            console.warn("Could not get fresh profile data from server");
+          }
+
+          // Verify profile completion
+          const isComplete = await userService.verifyProfileCompletion();
+          console.log(
+            `Profile completion verified for Google login: ${isComplete}`
+          );
+
+          // Use the verified status
+          userData.profileSetupComplete = isComplete;
+
+          // Set user directly with updated profile status
+          setUser(userData);
           setIsAuthenticated(true);
 
           // Store in AsyncStorage only after state is set
           await AsyncStorage.setItem(
-            USER_DATA_KEY,
-            JSON.stringify(response.user)
+            getUserDataKey(userData.email),
+            JSON.stringify(userData)
           );
 
           console.log("Google login complete, user data stored");
           return true;
         } catch (userError) {
           console.error("Error getting user data:", userError);
-          await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+          await clearAllAuthData();
           setIsAuthenticated(false);
           return false;
         }
@@ -260,19 +336,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       console.log(`Opening Google Auth URL: ${authUrl}`);
 
       // Use openAuthSessionAsync for a better authentication flow
-      const result = await WebBrowser.openAuthSessionAsync(
-        authUrl,
-        redirectUri
-      );
-      console.log("Auth session result:", JSON.stringify(result));
+      let result;
+      try {
+        result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
+        console.log("Auth session result:", JSON.stringify(result));
+      } catch (browserError) {
+        console.error("WebBrowser error:", browserError);
+        Alert.alert(
+          "Browser Error",
+          "Failed to open the authentication browser. Please try again."
+        );
+        return;
+      }
 
       if (result.type === "success" && result.url) {
         console.log("Successful auth redirect URL:", result.url);
-        const success = await handleUrlRedirect(result.url);
-        if (success) {
-          console.log("Successfully authenticated with Google");
-          // Successfully authenticated, now we can set the user as logged in
-          setIsAuthenticated(true);
+
+        // Add timeout to handle URL redirect
+        try {
+          const redirectPromise = handleUrlRedirect(result.url);
+          const timeoutPromise = new Promise<boolean>((_, reject) =>
+            setTimeout(() => reject(new Error("Redirect timed out")), 15000)
+          );
+
+          const success = await Promise.race([
+            redirectPromise,
+            timeoutPromise,
+          ]).catch((err) => {
+            console.error("Redirect error or timeout:", err);
+            return false;
+          });
+
+          if (success) {
+            console.log("Successfully authenticated with Google");
+            // Successfully authenticated, now we can set the user as logged in
+            setIsAuthenticated(true);
+            return;
+          } else {
+            throw new Error("Failed to process authentication redirect");
+          }
+        } catch (redirectError) {
+          console.error("Redirect processing error:", redirectError);
+          Alert.alert(
+            "Authentication Error",
+            "Failed to process the login response. Please try again."
+          );
           return;
         }
       } else if (result.type === "cancel") {
@@ -282,13 +390,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           "You cancelled the Google sign-in process."
         );
         return;
+      } else {
+        console.error("WebBrowser returned unexpected result:", result);
+        Alert.alert(
+          "Authentication Failed",
+          "Could not sign in with Google. Please try again or use email login."
+        );
+        return;
       }
-
-      // If we get here, something went wrong
-      Alert.alert(
-        "Authentication Failed",
-        "Could not sign in with Google. Please try again or use email login."
-      );
     } catch (error) {
       console.error("Google sign in error:", error);
       Alert.alert(
@@ -370,22 +479,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const signOut = async () => {
     try {
-      setIsLoading(true);
+      console.log("Signing out user");
 
-      // Clear AsyncStorage
-      await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-      await AsyncStorage.removeItem(USER_DATA_KEY);
+      // Store email before clearing state for proper key cleanup
+      const userEmail = user?.email;
 
-      // Reset auth state
+      // Clear auth service state
+      await authService.signOut();
+
+      // Clear AsyncStorage with email-specific keys if available
+      await clearAllAuthData();
+
+      // Reset state
       setUser(null);
       setIsAuthenticated(false);
 
-      console.log("User signed out successfully");
+      console.log("Sign out complete");
     } catch (error) {
-      console.error("Error signing out:", error);
-      Alert.alert("Error", "Failed to sign out. Please try again.");
-    } finally {
-      setIsLoading(false);
+      console.error("Error during sign out:", error);
     }
   };
 
@@ -394,195 +505,153 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     password: string
   ): Promise<SignInResult> => {
     try {
-      setIsLoading(true);
-      console.log("Logging in with email:", email);
-
-      // Use our custom authService
+      console.log(`Signing in with email: ${email}`);
       const response = await authService.signIn(email, password);
 
       if (response.success && response.token) {
-        // First, clear all auth state completely
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-        await AsyncStorage.removeItem(USER_DATA_KEY);
+        await clearAllAuthData();
         setUser(null);
         setIsAuthenticated(false);
-
-        console.log("Completely cleared auth state before manual login");
-
-        // Wait a moment for AsyncStorage to complete
         await new Promise((resolve) => setTimeout(resolve, 100));
 
-        // Save the token directly
-        try {
-          await AsyncStorage.setItem(AUTH_TOKEN_KEY, response.token);
-        } catch (storageError) {
-          console.error("AsyncStorage error:", storageError);
-          Alert.alert("Login Error", "Could not save login credentials");
-          return false;
-        }
+        // Save token ONLY to user-specific location
+        await AsyncStorage.setItem(getAuthTokenKey(email), response.token);
 
-        // Get user data using direct token approach
-        console.log("Getting user data with token directly...");
-        const userResponse = await authService.getCurrentUserWithToken(
+        // Fetch FRESH user data using the token to ensure consistency
+        const currentUserResponse = await authService.getCurrentUserWithToken(
           response.token
         );
 
-        if (!userResponse.success || !userResponse.user) {
+        if (!currentUserResponse.success || !currentUserResponse.user) {
           console.error(
-            "Failed to get user data during manual login:",
-            userResponse.error
+            "Failed to fetch user data after login:",
+            currentUserResponse.error
           );
+          await clearAllAuthData(); // Clean up failed login
           Alert.alert(
             "Login Error",
-            "Failed to retrieve your account information."
+            "Could not retrieve user profile after login."
           );
           return false;
         }
 
-        // Set user directly
-        setUser(userResponse.user);
+        const userDataFromApi = currentUserResponse.user;
+
+        // *** ADD PROFILE VERIFICATION ***
+        console.log("Verifying profile completion for email login...");
+        const isComplete = await userService.verifyProfileCompletion();
+        console.log(`Profile completion verified for ${email}: ${isComplete}`);
+
+        const finalUserData = {
+          ...userDataFromApi,
+          profileSetupComplete: isComplete, // Use verified status
+        };
+
+        // Update state
+        setUser(finalUserData);
         setIsAuthenticated(true);
 
-        // Store in AsyncStorage only after state is set
+        // Store FINAL verified data ONLY in user-specific location
         await AsyncStorage.setItem(
-          USER_DATA_KEY,
-          JSON.stringify(userResponse.user)
+          getUserDataKey(email),
+          JSON.stringify(finalUserData)
         );
+        console.log(`User data saved for ${email}`);
 
-        console.log(
-          "Manual login complete, user data stored:",
-          userResponse.user.email
-        );
         return true;
+      } else if (response.requiresVerification) {
+        return { requiresVerification: true, email: response.email || email };
       } else {
-        // Handle verification required case
-        if (response.requiresVerification) {
-          console.log("Account requires verification:", email);
-          Alert.alert(
-            "Verification Required",
-            "Your account needs to be verified. Please check your email for verification code or request a new one."
-          );
-          return { requiresVerification: true, email: response.email };
-        }
-
-        console.error("Login failed:", response.error);
-        Alert.alert(
-          "Login Failed",
-          response.error || "Invalid credentials. Please try again."
-        );
+        Alert.alert("Login Error", response.error || "Authentication failed");
         return false;
       }
-    } catch (error: any) {
-      console.error("Login error:", error);
+    } catch (error) {
+      console.error("Error during login:", error);
+      Alert.alert("Login Error", "An unexpected error occurred.");
+      return false;
+    }
+  };
 
-      // Check if this is a Google-authenticated user trying to log in with password
-      if (error.response?.status === 400 && error.response?.data?.error) {
-        Alert.alert(
-          "Login Failed",
-          error.response.data.error || "Please use Google sign-in instead."
+  const checkExistingToken = async () => {
+    try {
+      setIsLoading(true);
+      setUser(null);
+      setIsAuthenticated(false);
+
+      // Try to get user profile directly using userService
+      // This internally handles token retrieval logic
+      const response = await userService.getProfile();
+
+      if (!response.success || !response.user) {
+        console.log("No valid session found or user data not available");
+        await clearAllAuthData();
+        setIsLoading(false);
+        return;
+      }
+
+      const userDataFromApi = response.user;
+
+      try {
+        // Verify profile completion
+        const isComplete = await userService.verifyProfileCompletion();
+        console.log(
+          `Profile completion verified for existing session: ${isComplete}`
         );
-      } else {
-        Alert.alert(
-          "Login Failed",
-          "Could not login with email and password. Please check your credentials and try again."
+
+        const finalUserData = {
+          ...userDataFromApi,
+          profileSetupComplete: isComplete,
+        };
+
+        // Set state
+        setUser(finalUserData);
+        setIsAuthenticated(true);
+
+        // Save verified data ONLY to user-specific key
+        if (finalUserData.email) {
+          await AsyncStorage.setItem(
+            getUserDataKey(finalUserData.email),
+            JSON.stringify(finalUserData)
+          );
+          console.log(`Verified session data saved for ${finalUserData.email}`);
+        }
+
+        console.log("Session restored successfully");
+      } catch (verifyError) {
+        console.error("Error verifying profile completion:", verifyError);
+        // Even if verification fails, still set the user with server-provided profileSetupComplete
+        setUser(userDataFromApi);
+        setIsAuthenticated(true);
+        console.log(
+          "Session restored with unverified profile completion status"
         );
       }
-      return false;
+    } catch (error) {
+      console.error("Error checking for token:", error);
+      await clearAllAuthData();
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Check for existing token and restore auth state
-  const checkExistingToken = async () => {
-    try {
-      setIsLoading(true);
-      console.log("Checking for existing authentication token...");
+  // Ensure state is updated before navigation
+  const setUserWithRefresh = (newUser: User | null) => {
+    console.log("Setting user with refresh:", newUser?.email);
 
-      // Reset state first
-      setUser(null);
-      setIsAuthenticated(false);
+    // Set user with a slight delay to ensure the state updates completely
+    setUser(newUser);
 
-      // Check for token in AsyncStorage
-      const token = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
-      const storedUserData = await AsyncStorage.getItem(USER_DATA_KEY);
+    // If user was updated with profileSetupComplete = true, we need to refresh auth state
+    if (newUser && newUser.profileSetupComplete === true) {
+      console.log("User profile completed, refreshing auth state");
 
-      if (!token) {
-        console.log("No token found, user is not authenticated");
-        setIsLoading(false);
-        return;
-      }
-
-      console.log("Found existing token, validating with server...");
-
-      // Try to get user data with token from API
-      try {
-        const response = await authService.getCurrentUser();
-
-        // Handle user mismatch error - force full logout
-        if (!response.success && response.mismatch) {
-          console.error("USER DATA MISMATCH DETECTED! Forcing logout.");
-          console.error(`Expected user from token: ${response.tokenEmail}`);
-          console.error(`Got user from server: ${response.dataEmail}`);
-
-          // Clear everything
-          await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-          await AsyncStorage.removeItem(USER_DATA_KEY);
-          setUser(null);
-          setIsAuthenticated(false);
-
-          Alert.alert(
-            "Authentication Error",
-            "Your login session has expired or is invalid. Please log in again.",
-            [{ text: "OK" }]
-          );
-
-          setIsLoading(false);
-          return;
-        }
-
-        if (!response.success || !response.user) {
-          console.log("Invalid token - clearing storage");
-          await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-          await AsyncStorage.removeItem(USER_DATA_KEY);
-          setIsLoading(false);
-          return;
-        }
-
-        console.log("User data from API:", JSON.stringify(response.user));
-
-        // Check and update profile status for existing users
-        const profileStatus = await userService.ensureProfileStatus();
-        console.log("Profile status response:", JSON.stringify(profileStatus));
-
-        // Use API data, with profile status updates if available
-        const userData =
-          profileStatus.success && profileStatus.user
-            ? profileStatus.user
-            : response.user;
-
-        console.log("Final user data being set:", JSON.stringify(userData));
-
-        // Set user and authentication state
-        setUser(userData);
-        setIsAuthenticated(true);
-
-        // Save updated user data to storage
-        await AsyncStorage.setItem(USER_DATA_KEY, JSON.stringify(userData));
-
-        console.log("Session restored successfully for:", userData.email);
-      } catch (error) {
-        console.error("Error restoring session:", error);
-        // Clear invalid token
-        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-        await AsyncStorage.removeItem(USER_DATA_KEY);
-      }
-    } catch (error) {
-      console.error("Error checking for token:", error);
-      await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-      await AsyncStorage.removeItem(USER_DATA_KEY);
-    } finally {
-      setIsLoading(false);
+      // Small delay to ensure navigation changes catch the new state
+      setTimeout(() => {
+        console.log("Auth state refresh complete");
+        // Force a re-render by toggling and resetting the state
+        setIsAuthenticated(false);
+        setTimeout(() => setIsAuthenticated(true), 50);
+      }, 100);
     }
   };
 
@@ -598,7 +667,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         signOut,
         handleUrlRedirect,
         signIn,
-        setUser,
+        setUser: setUserWithRefresh,
         setIsAuthenticated,
       }}
     >
