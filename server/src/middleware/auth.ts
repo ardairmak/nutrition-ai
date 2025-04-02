@@ -55,11 +55,25 @@ export const authenticate = async (
       const decoded = jwt.verify(token, secretKey) as {
         id: string;
         email: string;
+        exp?: number;
+        iat?: number;
+        jti?: string;
       };
 
       if (!decoded || !decoded.id || !decoded.email) {
         logger.error("Token payload missing required fields");
         return res.status(401).json({ error: "Invalid token data" });
+      }
+
+      // Verify token expiration manually for extra safety
+      const now = Math.floor(Date.now() / 1000);
+      if (decoded.exp && decoded.exp < now) {
+        logger.error(
+          `Token expired at ${new Date(
+            decoded.exp * 1000
+          ).toISOString()}, current time: ${new Date().toISOString()}`
+        );
+        return res.status(401).json({ error: "Token expired" });
       }
 
       logger.info(
@@ -83,12 +97,21 @@ export const authenticate = async (
           return res.status(401).json({ error: "User not found" });
         }
 
-        // Verify email matches to prevent ID confusion
+        // CRITICAL SECURITY CHECK: Double check the email in the token matches the one in the database
         if (user.email !== decoded.email) {
+          logger.error(`SECURITY ERROR: Email mismatch in token vs database!`);
           logger.error(
-            `Email mismatch! Token: ${decoded.email}, DB: ${user.email}`
+            `Token email: ${decoded.email}, DB email: ${user.email}`
           );
-          return res.status(401).json({ error: "Invalid token data" });
+          logger.error(
+            `This may indicate a token was reused for a different user!`
+          );
+          return res.status(403).json({
+            error: "Security violation: token does not match user",
+            mismatch: true,
+            tokenEmail: decoded.email,
+            dataEmail: user.email,
+          });
         }
 
         logger.info(`User authenticated: ${user.email} (${user.id})`);

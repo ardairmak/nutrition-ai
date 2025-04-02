@@ -147,6 +147,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
         activityLevel: true,
         dietaryPreferences: true,
         allergies: true,
+        fitnessGoals: true,
         dailyCalorieGoal: true,
         proteinGoal: true,
         carbsGoal: true,
@@ -155,6 +156,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
         isVerified: true,
         createdAt: true,
         profilePicture: true,
+        profileSetupComplete: true,
       },
     });
 
@@ -184,6 +186,7 @@ export const updateUserProfile = async (req: Request, res: Response) => {
       activityLevel,
       dietaryPreferences,
       allergies,
+      fitnessGoals,
       profileSetupComplete,
     } = req.body;
 
@@ -208,6 +211,7 @@ export const updateUserProfile = async (req: Request, res: Response) => {
         activityLevel,
         dietaryPreferences,
         allergies,
+        fitnessGoals,
         profileSetupComplete,
       },
       select: {
@@ -223,6 +227,7 @@ export const updateUserProfile = async (req: Request, res: Response) => {
         activityLevel: true,
         dietaryPreferences: true,
         allergies: true,
+        fitnessGoals: true,
         dailyCalorieGoal: true,
         profileSetupComplete: true,
       },
@@ -271,10 +276,12 @@ export const getCurrentUser = async (req: Request, res: Response) => {
         activityLevel: true,
         dietaryPreferences: true,
         allergies: true,
+        fitnessGoals: true,
         dailyCalorieGoal: true,
         createdAt: true,
         lastLogin: true,
         profileSetupComplete: true,
+        googleId: true, // Add this to check if it's a Google user
         // Exclude sensitive data like passwordHash
       },
     });
@@ -300,6 +307,34 @@ export const getCurrentUser = async (req: Request, res: Response) => {
       logger.error(
         `User email mismatch! Token: ${userEmail}, DB: ${user.email}`
       );
+    }
+
+    // CRITICAL FIX: Check if Google user with empty fitness goals
+    const isGoogleUser = !!user.googleId;
+    const hasEmptyFitnessGoals =
+      !user.fitnessGoals ||
+      !Array.isArray(user.fitnessGoals) ||
+      user.fitnessGoals.length === 0;
+
+    if (isGoogleUser && hasEmptyFitnessGoals && user.profileSetupComplete) {
+      logger.warn(
+        `Google user ${user.email} has empty fitness goals but profile marked complete. Fixing...`
+      );
+
+      // Force profile to incomplete if Google user has empty fitness goals
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { profileSetupComplete: false },
+        });
+
+        // Update the user object
+        user.profileSetupComplete = false;
+
+        logger.info(`Updated profileSetupComplete to false for ${user.email}`);
+      } catch (updateError) {
+        logger.error(`Failed to update profileSetupComplete: ${updateError}`);
+      }
     }
 
     // Return user data
@@ -331,6 +366,7 @@ export const updateUser = async (req: Request, res: Response) => {
       activityLevel,
       dietaryPreferences,
       allergies,
+      fitnessGoals,
       dailyCalorieGoal,
       profilePicture,
     } = req.body;
@@ -349,6 +385,7 @@ export const updateUser = async (req: Request, res: Response) => {
         activityLevel,
         dietaryPreferences,
         allergies,
+        fitnessGoals,
         dailyCalorieGoal,
         profilePicture,
         updatedAt: new Date(),
@@ -366,6 +403,7 @@ export const updateUser = async (req: Request, res: Response) => {
         activityLevel: true,
         dietaryPreferences: true,
         allergies: true,
+        fitnessGoals: true,
         dailyCalorieGoal: true,
         profilePicture: true,
       },
@@ -375,5 +413,92 @@ export const updateUser = async (req: Request, res: Response) => {
   } catch (error) {
     logger.error(`Error updating user: ${error}`);
     return res.status(500).json({ error: "Server error" });
+  }
+};
+
+// Force update fitness goals for users (especially useful for Google users)
+export const forceUpdateGoals = async (req: Request, res: Response) => {
+  try {
+    const userId = (req.user as { id: string }).id;
+    const { fitnessGoals } = req.body;
+
+    console.log(`Force update goals request for user ${userId}:`, fitnessGoals);
+
+    if (
+      !fitnessGoals ||
+      !Array.isArray(fitnessGoals) ||
+      fitnessGoals.length === 0
+    ) {
+      console.error("Invalid fitness goals data:", fitnessGoals);
+      return res.status(400).json({
+        success: false,
+        error: "Invalid fitness goals data. Must be a non-empty array.",
+      });
+    }
+
+    // First get the current user to verify
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!currentUser) {
+      console.error(`User ${userId} not found in database`);
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    console.log(
+      `User ${userId} found, current goals:`,
+      currentUser.fitnessGoals
+    );
+
+    // Update the user's fitness goals directly in database
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        fitnessGoals: fitnessGoals,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(
+      `User ${userId} goals updated successfully:`,
+      updatedUser.fitnessGoals
+    );
+
+    // Verify update was successful
+    if (
+      !updatedUser.fitnessGoals ||
+      !Array.isArray(updatedUser.fitnessGoals) ||
+      updatedUser.fitnessGoals.length === 0
+    ) {
+      console.error(
+        `Failed to update goals for user ${userId}, goals still empty:`,
+        updatedUser.fitnessGoals
+      );
+      return res.status(500).json({
+        success: false,
+        error: "Failed to update fitness goals. Please try again.",
+      });
+    }
+
+    // Return success response
+    return res.status(200).json({
+      success: true,
+      message: "Fitness goals updated successfully",
+      user: {
+        id: updatedUser.id,
+        email: updatedUser.email,
+        fitnessGoals: updatedUser.fitnessGoals,
+      },
+    });
+  } catch (error) {
+    console.error("Error in forceUpdateGoals:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Server error while updating fitness goals",
+    });
   }
 };

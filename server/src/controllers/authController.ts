@@ -5,6 +5,7 @@ import prisma from "../config/prisma";
 import { logger } from "../utils/logger";
 import { AuthRequest } from "../middleware/auth";
 import { sendVerificationEmail as sendEmail } from "../utils/emailService";
+import crypto from "crypto";
 
 // Helper function to generate JWT tokens consistently
 const generateJwtToken = (userId: string, userEmail: string): string => {
@@ -14,10 +15,15 @@ const generateJwtToken = (userId: string, userEmail: string): string => {
     throw new Error("Server configuration error");
   }
 
+  // Add expiration and additional security measures
   const token = jwt.sign(
     {
       id: userId,
       email: userEmail,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // 24 hours
+      sub: userId, // Subject claim
+      jti: crypto.randomUUID(), // Unique token ID to prevent reuse
     },
     secretKey
   );
