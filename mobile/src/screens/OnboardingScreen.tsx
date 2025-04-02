@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,16 +7,69 @@ import {
   SafeAreaView,
   Image,
   Dimensions,
+  Alert,
+  ActivityIndicator,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../navigation/types";
+import userService from "../services/userService";
+import { useAuth } from "../contexts/AuthContext";
 
 const { width } = Dimensions.get("window");
 
 export function OnboardingScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { user, setUser } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Log user details to help debug
+  useEffect(() => {
+    if (user) {
+      console.log("OnboardingScreen - User details:", {
+        email: user.email,
+        provider: user.provider || "unknown",
+        profileComplete: user.profileSetupComplete,
+        hasName: !!(user.firstName && user.lastName),
+        hasStats: !!(user.height && user.weight),
+        hasDiet: !!(user.dietaryPreferences && user.activityLevel),
+        hasGoals: !!(user.fitnessGoals && user.fitnessGoals.length > 0),
+      });
+    }
+  }, [user]);
+
+  // Function to handle skipping onboarding
+  const handleSkip = async () => {
+    setIsLoading(true);
+    try {
+      // Mark profile as complete directly
+      console.log("Skipping onboarding and marking profile as complete...");
+      const response = await userService.completeOnboarding();
+
+      if (response.success && response.user) {
+        console.log("Profile marked as complete via skip:", response.user);
+        // Update user in context
+        setUser(response.user);
+        // Success message
+        Alert.alert(
+          "Setup Skipped",
+          "You can always complete your profile later in settings.",
+          [{ text: "OK" }]
+        );
+      } else {
+        console.error("Failed to skip onboarding:", response.error);
+        // If skip fails, fallback to the name screen
+        navigation.navigate("OnboardingName");
+      }
+    } catch (error) {
+      console.error("Error skipping onboarding:", error);
+      // If error, fallback to the name screen
+      navigation.navigate("OnboardingName");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -70,15 +123,21 @@ export function OnboardingScreen() {
         <TouchableOpacity
           style={styles.button}
           onPress={() => navigation.navigate("OnboardingName")}
+          disabled={isLoading}
         >
           <Text style={styles.buttonText}>Let's Start</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.skipButton}
-          onPress={() => navigation.navigate("Home")}
+          onPress={handleSkip}
+          disabled={isLoading}
         >
-          <Text style={styles.skipButtonText}>Skip for now</Text>
+          {isLoading ? (
+            <ActivityIndicator size="small" color="#888" />
+          ) : (
+            <Text style={styles.skipButtonText}>Skip for now</Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>

@@ -1,71 +1,98 @@
-import React from "react";
-import { ActivityIndicator, View } from "react-native";
+import React, { useEffect } from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { RootStackParamList } from "./types";
+import { Text, ActivityIndicator, View, StyleSheet } from "react-native";
 import { HomeScreen } from "../screens/HomeScreen";
 import { LoginScreen } from "../screens/LoginScreen";
 import { VerificationScreen } from "../screens/VerificationScreen";
 import { OnboardingScreen } from "../screens/OnboardingScreen";
 import { OnboardingNameScreen } from "../screens/OnboardingNameScreen";
+import { OnboardingStatsScreen } from "../screens/OnboardingStatsScreen";
+import { OnboardingDietScreen } from "../screens/PlaceholderScreens";
+import { OnboardingGoalsScreen } from "../screens/OnboardingGoalsScreen";
 import { useAuth } from "../contexts/AuthContext";
 
-const Stack = createNativeStackNavigator<RootStackParamList>();
+const Stack = createNativeStackNavigator();
 
-// Auth screen to handle redirects
-const AuthRedirectScreen = () => {
-  const { isAuthenticated } = useAuth();
-
-  // This is just a placeholder for the deep link
-  // The actual logic is in the AuthContext's handleUrlRedirect
-
-  return null;
-};
-
-export function Navigation({ linking }: { linking?: any }) {
+export default function Navigation() {
   const { isAuthenticated, isLoading, user } = useAuth();
 
+  // Debug log for navigation state changes
+  useEffect(() => {
+    console.log("Navigation Auth State:", {
+      isLoading,
+      isAuthenticated,
+      userEmail: user?.email,
+      profileSetupComplete: user?.profileSetupComplete,
+    });
+  }, [isLoading, isAuthenticated, user]);
+
+  // Show loading indicator while AuthContext is initializing
   if (isLoading) {
-    // Show loading screen while checking authentication status
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4285F4" />
+        <Text style={styles.loadingText}>Initializing...</Text>
       </View>
     );
   }
 
   return (
-    <NavigationContainer linking={linking}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <NavigationContainer>
+      <Stack.Navigator
+        screenOptions={{
+          headerShown: false,
+        }}
+      >
         {isAuthenticated ? (
-          // User is signed in
-          user && user.profileSetupComplete !== true ? (
-            // Show onboarding if profile is not complete
-            // This handles both false and undefined values
+          user?.profileSetupComplete ? (
+            // User is authenticated and profile is complete
+            <Stack.Screen name="Home" component={HomeScreen} />
+          ) : (
+            // User is authenticated but needs onboarding
+            // The stack handles the flow internally, starting from Onboarding
             <>
               <Stack.Screen name="Onboarding" component={OnboardingScreen} />
               <Stack.Screen
                 name="OnboardingName"
                 component={OnboardingNameScreen}
               />
-              {/* Add other onboarding screens here */}
-              {/* <Stack.Screen name="OnboardingStats" component={OnboardingStatsScreen} />
-              <Stack.Screen name="OnboardingDiet" component={OnboardingDietScreen} />
-              <Stack.Screen name="OnboardingGoals" component={OnboardingGoalsScreen} /> */}
+              <Stack.Screen
+                name="OnboardingStats"
+                component={OnboardingStatsScreen}
+              />
+              <Stack.Screen
+                name="OnboardingDiet"
+                component={OnboardingDietScreen}
+              />
+              <Stack.Screen
+                name="OnboardingGoals"
+                component={OnboardingGoalsScreen}
+              />
             </>
-          ) : (
-            // Show main app
-            <Stack.Screen name="Home" component={HomeScreen} />
           )
         ) : (
-          // User is not signed in
+          // User is not authenticated
           <>
             <Stack.Screen name="Login" component={LoginScreen} />
             <Stack.Screen name="Verification" component={VerificationScreen} />
-            <Stack.Screen name="AuthRedirect" component={AuthRedirectScreen} />
           </>
         )}
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: "#666",
+  },
+});

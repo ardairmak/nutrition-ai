@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -17,46 +17,81 @@ import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../navigation/types";
 import { useAuth } from "../contexts/AuthContext";
 import userService from "../services/userService";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { AUTH_TOKEN_KEY } from "../constants";
 
 export function OnboardingNameScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, setUser } = useAuth();
 
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
+  const [firstName, setFirstName] = useState(user?.firstName || "");
+  const [lastName, setLastName] = useState(user?.lastName || "");
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleNext = async () => {
+  useEffect(() => {
+    console.log("OnboardingNameScreen - Current user data:", {
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+      email: user?.email,
+      provider: user?.provider,
+    });
+
+    // Debug token availability
+    const checkToken = async () => {
+      try {
+        console.log("Checking all AsyncStorage keys...");
+        const allKeys = await AsyncStorage.getAllKeys();
+        console.log("Available keys:", allKeys);
+
+        // Check if we can get a token via userService
+        const token = await userService.getUserToken();
+        console.log(`Token available via userService: ${!!token}`);
+
+        // Look for user-specific token
+        if (user?.email) {
+          const userKey = `@auth_token_${user.email.toLowerCase()}`;
+          const userToken = await AsyncStorage.getItem(userKey);
+          console.log(`User-specific token (${userKey}): ${!!userToken}`);
+        }
+
+        // Check generic token
+        const genericToken = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+        console.log(`Generic token: ${!!genericToken}`);
+      } catch (error) {
+        console.error("Error checking token:", error);
+      }
+    };
+
+    checkToken();
+  }, [user]);
+
+  const handleComplete = async () => {
     if (!firstName || !lastName) {
-      Alert.alert("Please enter both first and last name");
+      Alert.alert("Please enter both your first and last name");
       return;
     }
 
     setIsLoading(true);
+
     try {
-      // Update user profile with name
+      // Update profile with names but don't mark as complete yet
       const response = await userService.updateProfile({
         firstName,
         lastName,
+        // We removed profileSetupComplete: true to continue the onboarding flow
       });
 
       if (response.success) {
-        // Update the user context with the new name
-        setUser({
-          ...user!,
-          firstName,
-          lastName,
-        });
-
-        // Move to next step
+        console.log("Names updated successfully, continuing to stats screen");
+        // Navigate to the next onboarding screen instead of completing
         navigation.navigate("OnboardingStats");
       } else {
         Alert.alert("Error", response.error || "Failed to update profile");
       }
     } catch (error) {
       console.error("Error updating profile:", error);
-      Alert.alert("Error", "Something went wrong. Please try again.");
+      Alert.alert("Error", "An unexpected error occurred");
     } finally {
       setIsLoading(false);
     }
@@ -66,14 +101,12 @@ export function OnboardingNameScreen() {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.keyboardAvoid}
+        style={styles.keyboardView}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView contentContainerStyle={styles.scrollView}>
           <View style={styles.header}>
-            <Text style={styles.title}>Tell us your name</Text>
-            <Text style={styles.subtitle}>
-              We'll use this to personalize your experience
-            </Text>
+            <Text style={styles.title}>Your Name</Text>
+            <Text style={styles.subtitle}>Let us know what to call you.</Text>
           </View>
 
           <View style={styles.form}>
@@ -81,10 +114,11 @@ export function OnboardingNameScreen() {
               <Text style={styles.label}>First Name</Text>
               <TextInput
                 style={styles.input}
-                placeholder="John"
                 value={firstName}
                 onChangeText={setFirstName}
+                placeholder="Enter your first name"
                 autoCapitalize="words"
+                autoCorrect={false}
               />
             </View>
 
@@ -92,34 +126,28 @@ export function OnboardingNameScreen() {
               <Text style={styles.label}>Last Name</Text>
               <TextInput
                 style={styles.input}
-                placeholder="Doe"
                 value={lastName}
                 onChangeText={setLastName}
+                placeholder="Enter your last name"
                 autoCapitalize="words"
+                autoCorrect={false}
               />
             </View>
           </View>
 
-          <View style={styles.navigation}>
-            <TouchableOpacity
-              style={styles.skipButton}
-              onPress={() => navigation.navigate("OnboardingStats")}
-            >
-              <Text style={styles.skipButtonText}>Skip</Text>
-            </TouchableOpacity>
-
+          <View style={styles.footer}>
             <TouchableOpacity
               style={[
-                styles.nextButton,
-                (!firstName || !lastName) && styles.nextButtonDisabled,
+                styles.button,
+                (!firstName || !lastName) && styles.buttonDisabled,
               ]}
-              onPress={handleNext}
-              disabled={isLoading || !firstName || !lastName}
+              onPress={handleComplete}
+              disabled={!firstName || !lastName || isLoading}
             >
               {isLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.nextButtonText}>Next</Text>
+                <Text style={styles.buttonText}>Next</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -134,10 +162,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
   },
-  keyboardAvoid: {
+  keyboardView: {
     flex: 1,
   },
-  scrollContent: {
+  scrollView: {
     flexGrow: 1,
     padding: 24,
   },
@@ -175,19 +203,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e5e5e5",
   },
-  navigation: {
+  footer: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    justifyContent: "center",
     marginTop: "auto",
   },
-  skipButton: {
-    padding: 12,
-  },
-  skipButtonText: {
-    color: "#888",
-    fontSize: 16,
-  },
-  nextButton: {
+  button: {
     backgroundColor: "#4285F4",
     paddingVertical: 14,
     paddingHorizontal: 24,
@@ -195,10 +216,10 @@ const styles = StyleSheet.create({
     minWidth: 100,
     alignItems: "center",
   },
-  nextButtonDisabled: {
+  buttonDisabled: {
     backgroundColor: "#A8C7FA",
   },
-  nextButtonText: {
+  buttonText: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "bold",
