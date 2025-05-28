@@ -37,6 +37,8 @@ model User {
     createdAt             DateTime             @default(now())
     updatedAt             DateTime             @updatedAt
     lastLogin             DateTime?
+    loginStreak           Int                  @default(0)
+    lastStreakUpdate      DateTime?
     profilePicture        String?
     profileSetupComplete  Boolean              @default(false)
     mealEntries           MealEntry[]
@@ -45,12 +47,13 @@ model User {
     friendsReceived       UserFriend[]         @relation("FriendToUser")
     achievements          UserAchievement[]
     mealRecommendations   MealRecommendation[]
+    loginHistory          UserLoginHistory[]
 }
 
 model WeightHistory {
     id         String   @id @default(uuid())
     userId     String
-    user       User     @relation(fields: [userId], references: [id])
+    user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
     weight     Float
     recordedAt DateTime @default(now())
 
@@ -60,7 +63,7 @@ model WeightHistory {
 model MealEntry {
     id              String     @id @default(uuid())
     userId          String
-    user            User       @relation(fields: [userId], references: [id])
+    user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
     mealType        String
     mealName        String
     totalCalories   Float
@@ -78,7 +81,7 @@ model MealEntry {
 model FoodItem {
     id             String    @id @default(uuid())
     mealEntryId    String
-    mealEntry      MealEntry @relation(fields: [mealEntryId], references: [id])
+    mealEntry      MealEntry @relation(fields: [mealEntryId], references: [id], onDelete: Cascade)
     foodName       String
     portionSize    Float
     portionUnit    String
@@ -100,9 +103,9 @@ model FoodItem {
 model UserFriend {
     id        String   @id @default(uuid())
     userId    String
-    user      User     @relation("UserFriends", fields: [userId], references: [id])
+    user      User     @relation("UserFriends", fields: [userId], references: [id], onDelete: Cascade)
     friendId  String
-    friend    User     @relation("FriendToUser", fields: [friendId], references: [id])
+    friend    User     @relation("FriendToUser", fields: [friendId], references: [id], onDelete: Cascade)
     status    String
     createdAt DateTime @default(now())
     updatedAt DateTime @updatedAt
@@ -124,7 +127,7 @@ model Achievement {
 model UserAchievement {
     id            String      @id @default(uuid())
     userId        String
-    user          User        @relation(fields: [userId], references: [id])
+    user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
     achievementId String
     achievement   Achievement @relation(fields: [achievementId], references: [id])
     earnedAt      DateTime    @default(now())
@@ -136,10 +139,20 @@ model UserAchievement {
 model MealRecommendation {
     id                 String   @id @default(uuid())
     userId             String
-    user               User     @relation(fields: [userId], references: [id])
+    user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
     recommendationJson Json
     createdAt          DateTime @default(now())
     isViewed           Boolean  @default(false)
 
     @@index([userId])
+}
+
+model UserLoginHistory {
+    id        String   @id @default(uuid())
+    userId    String
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    loginDate DateTime @default(now())
+
+    @@unique([userId, loginDate])
+    @@index([loginDate])
 }
