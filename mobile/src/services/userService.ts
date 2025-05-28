@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AUTH_TOKEN_KEY, USER_DATA_KEY } from "../constants";
 import { apiCall, API_URL } from "./api";
+import { getAuthToken } from "./api";
 
 // Helper to get user-specific token key
 const getUserTokenKey = (email: string) => `@auth_token_${email.toLowerCase()}`;
@@ -31,6 +32,23 @@ interface ApiResponse {
   error?: string;
   message?: string;
   [key: string]: any; // For additional response fields
+}
+
+interface GetMealsParams {
+  startDate: string;
+  endDate: string;
+}
+
+interface Meal {
+  id: string;
+  mealType: string;
+  mealName: string;
+  totalCalories: number;
+  totalProtein: number;
+  totalCarbs: number;
+  totalFat: number;
+  consumedAt: string;
+  foodItems: any[];
 }
 
 /**
@@ -248,6 +266,51 @@ const userService = {
       return {
         success: false,
         error: "An unexpected error occurred while completing onboarding",
+      };
+    }
+  },
+
+  // Log a meal entry
+  logMeal: async (mealData: {
+    mealType: string;
+    mealName: string;
+    totalCalories: number;
+    totalProtein: number;
+    totalCarbs: number;
+    totalFat: number;
+    consumedAt?: Date;
+    foodItems: any[];
+    gptAnalysisJson?: any;
+  }): Promise<ApiResponse> => {
+    try {
+      console.log("UserService: Logging meal:", JSON.stringify(mealData));
+
+      const response = await apiCall(
+        "/users/meals",
+        "POST",
+        mealData,
+        true // This endpoint requires authentication
+      );
+
+      if (response.success) {
+        console.log("UserService: Meal logged successfully");
+        return {
+          success: true,
+          message: "Meal logged successfully",
+          mealEntry: response.mealEntry,
+        };
+      } else {
+        console.error("UserService: Failed to log meal:", response.error);
+        return {
+          success: false,
+          error: response.error || "Failed to log meal",
+        };
+      }
+    } catch (error) {
+      console.error("UserService: Error logging meal:", error);
+      return {
+        success: false,
+        error: "An unexpected error occurred while logging meal",
       };
     }
   },
@@ -526,6 +589,194 @@ const userService = {
     } catch (error) {
       console.error("Error getting onboarding progress:", error);
       return { completedSteps: [], lastCompletedStep: null };
+    }
+  },
+
+  // Friend-related API calls
+  getFriends: async () => {
+    const token = await getAuthToken();
+    const response = await fetch(`${API_URL}/friends`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch friends");
+    }
+
+    return response.json();
+  },
+
+  getFriendRequests: async () => {
+    const token = await getAuthToken();
+    const response = await fetch(`${API_URL}/friends/requests`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch friend requests");
+    }
+
+    return response.json();
+  },
+
+  sendFriendRequest: async (friendId: string) => {
+    const token = await getAuthToken();
+    const response = await fetch(`${API_URL}/friends/request`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ friendId }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to send friend request");
+    }
+
+    return response.json();
+  },
+
+  acceptFriendRequest: async (friendId: string) => {
+    const token = await getAuthToken();
+    const response = await fetch(`${API_URL}/friends/accept`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ friendId }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to accept friend request");
+    }
+
+    return response.json();
+  },
+
+  rejectFriendRequest: async (friendId: string) => {
+    const token = await getAuthToken();
+    const response = await fetch(`${API_URL}/friends/reject`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ friendId }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to reject friend request");
+    }
+
+    return response.json();
+  },
+
+  removeFriend: async (friendId: string) => {
+    const token = await getAuthToken();
+    const response = await fetch(`${API_URL}/friends`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ friendId }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to remove friend");
+    }
+
+    return response.json();
+  },
+
+  getFriendProfile: async (friendId: string) => {
+    const token = await getAuthToken();
+    const response = await fetch(`${API_URL}/friends/${friendId}/profile`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to get friend profile");
+    }
+
+    return response.json();
+  },
+
+  // Get meals for a specific date range
+  getMeals: async (params: GetMealsParams): Promise<ApiResponse> => {
+    try {
+      console.log("UserService: Fetching meals:", params);
+
+      const response = await apiCall(
+        `/users/meals?startDate=${params.startDate}&endDate=${params.endDate}`,
+        "GET",
+        null,
+        true // This endpoint requires authentication
+      );
+
+      if (response.success) {
+        console.log("UserService: Meals fetched successfully");
+        return {
+          success: true,
+          message: "Meals fetched successfully",
+          meals: response.meals as Meal[],
+        };
+      } else {
+        console.error("UserService: Failed to fetch meals:", response.error);
+        return {
+          success: false,
+          error: response.error || "Failed to fetch meals",
+        };
+      }
+    } catch (error) {
+      console.error("UserService: Error fetching meals:", error);
+      return {
+        success: false,
+        error: "An unexpected error occurred while fetching meals",
+      };
+    }
+  },
+
+  // Search users
+  searchUsers: async (query: string) => {
+    const token = await getAuthToken();
+    const response = await fetch(
+      `${API_URL}/users/search?query=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Failed to search users");
+    }
+
+    return response.json();
+  },
+
+  // Fetch dashboard data (nutrition, streak, recent food)
+  getDashboardData: async (): Promise<any> => {
+    try {
+      const response = await apiCall(
+        "/users/dashboard-data",
+        "GET",
+        null,
+        true
+      );
+      return response;
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error);
+      return { success: false, error: "Failed to fetch dashboard data" };
     }
   },
 };

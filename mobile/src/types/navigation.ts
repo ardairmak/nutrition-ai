@@ -4,6 +4,7 @@ export type RootStackParamList = {
   Verification: {
     email: string;
   };
+  OnboardingNew: undefined;
 };
 
 export type AuthStackParamList = {

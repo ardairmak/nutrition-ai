@@ -86,6 +86,11 @@ export const apiCall = async (
     const url = `${API_URL}${endpoint}`;
     console.log(`API ${method} call to: ${url}`);
 
+    // Debug log the request payload for easier debugging
+    if (data) {
+      console.log("Request payload:", JSON.stringify(data, null, 2));
+    }
+
     // Prepare headers
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

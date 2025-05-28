@@ -41,9 +41,36 @@ export function LoginScreen() {
   } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>(AuthMode.LOGIN);
   const [requiresVerification, setRequiresVerification] = useState(false);
+
+  // Password validation function
+  const validatePassword = (pass: string) => {
+    const minLength = 8;
+    const hasUpperCase = /[A-Z]/.test(pass);
+    const hasLowerCase = /[a-z]/.test(pass);
+    const hasNumbers = /\d/.test(pass);
+    const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(pass);
+
+    if (pass.length < minLength) {
+      return "Password must be at least 8 characters long";
+    }
+    if (!hasUpperCase) {
+      return "Password must contain at least one uppercase letter";
+    }
+    if (!hasLowerCase) {
+      return "Password must contain at least one lowercase letter";
+    }
+    if (!hasNumbers) {
+      return "Password must contain at least one number";
+    }
+    if (!hasSpecialChar) {
+      return "Password must contain at least one special character";
+    }
+    return null;
+  };
 
   // Handle email/password sign in
   const handleSignIn = async () => {
@@ -126,8 +153,19 @@ export function LoginScreen() {
 
   // Handle account registration
   const handleRegister = async () => {
-    if (!email || !password) {
-      Alert.alert("Error", "Email and password are required");
+    if (!email || !password || !confirmPassword) {
+      Alert.alert("Error", "All fields are required");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert("Error", "Passwords do not match");
+      return;
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      Alert.alert("Error", passwordError);
       return;
     }
 
@@ -182,6 +220,7 @@ export function LoginScreen() {
     );
     // Clear form fields when switching modes
     setPassword("");
+    setConfirmPassword("");
   };
 
   // Dismiss keyboard when tapping outside input fields
@@ -268,6 +307,42 @@ export function LoginScreen() {
                   secureTextEntry
                 />
               </View>
+
+              {/* Confirm Password Input (only in register mode) */}
+              {authMode === AuthMode.REGISTER && (
+                <View style={styles.inputContainer}>
+                  <Text style={styles.label}>Confirm Password</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Confirm your password"
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    secureTextEntry
+                  />
+                </View>
+              )}
+
+              {/* Password Requirements (only in register mode) */}
+              {authMode === AuthMode.REGISTER && (
+                <View style={styles.passwordRequirements}>
+                  <Text style={styles.requirementsTitle}>
+                    Password Requirements:
+                  </Text>
+                  <Text style={styles.requirement}>
+                    • At least 8 characters
+                  </Text>
+                  <Text style={styles.requirement}>
+                    • At least one uppercase letter
+                  </Text>
+                  <Text style={styles.requirement}>
+                    • At least one lowercase letter
+                  </Text>
+                  <Text style={styles.requirement}>• At least one number</Text>
+                  <Text style={styles.requirement}>
+                    • At least one special character
+                  </Text>
+                </View>
+              )}
 
               {/* Email Auth Button */}
               <TouchableOpacity
@@ -516,5 +591,23 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 14,
     fontWeight: "600",
+  },
+  passwordRequirements: {
+    width: "100%",
+    padding: 12,
+    backgroundColor: "#f8f9fa",
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  requirementsTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#333",
+    marginBottom: 8,
+  },
+  requirement: {
+    fontSize: 12,
+    color: "#666",
+    marginBottom: 4,
   },
 });

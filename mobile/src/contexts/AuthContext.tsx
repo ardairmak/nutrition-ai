@@ -9,7 +9,7 @@ import {
   USER_DATA_KEY as GLOBAL_USER_DATA_KEY,
 } from "../constants";
 
-type User = {
+export type User = {
   id: string;
   email: string;
   firstName: string | null;
@@ -24,6 +24,8 @@ type User = {
   activityLevel?: string;
   dietaryPreferences?: string[];
   provider?: string; // 'google', 'email', etc.
+  loginStreak?: number;
+  dailyCalorieGoal?: number;
 };
 
 type SignInResult = boolean | { requiresVerification: boolean; email: string };
@@ -506,6 +508,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   ): Promise<SignInResult> => {
     try {
       console.log(`Signing in with email: ${email}`);
+
+      // Handle admin bypass specially
+      if (email === "admin" && password === "admin") {
+        console.log("Using admin testing bypass in AuthContext");
+
+        // Admin bypass - create fake user data that skips verification
+        const adminUser: User = {
+          id: "admin123",
+          email: "admin@test.com",
+          firstName: "Admin",
+          lastName: "User",
+          profilePicture: null,
+          profileSetupComplete: true,
+          fitnessGoals: ["weight_loss", "muscle_gain"],
+          height: 180,
+          weight: 75,
+          gender: "not_specified",
+          dateOfBirth: new Date().toISOString(),
+          activityLevel: "moderate",
+          dietaryPreferences: [],
+          provider: "email",
+        };
+
+        // Set state directly
+        setUser(adminUser);
+        setIsAuthenticated(true);
+
+        // No need to verify profile completion for admin
+        console.log("Admin login successful - skipping verification");
+        return true;
+      }
+
+      // Regular authentication path
       const response = await authService.signIn(email, password);
 
       if (response.success && response.token) {
@@ -638,12 +673,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const setUserWithRefresh = (newUser: User | null) => {
     console.log("Setting user with refresh:", newUser?.email);
 
-    // Set user with a slight delay to ensure the state updates completely
+    // Set user directly without toggling authentication unless the profile
+    // is being completed for the first time
     setUser(newUser);
 
-    // If user was updated with profileSetupComplete = true, we need to refresh auth state
-    if (newUser && newUser.profileSetupComplete === true) {
-      console.log("User profile completed, refreshing auth state");
+    // Only toggle authentication state if this is the FIRST TIME profile is being completed
+    // and the previous state was profileSetupComplete: false
+    if (
+      newUser &&
+      newUser.profileSetupComplete === true &&
+      user &&
+      user.profileSetupComplete === false
+    ) {
+      console.log(
+        "User profile completed for the FIRST TIME, refreshing auth state"
+      );
 
       // Small delay to ensure navigation changes catch the new state
       setTimeout(() => {

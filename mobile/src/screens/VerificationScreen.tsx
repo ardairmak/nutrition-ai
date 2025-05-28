@@ -123,7 +123,8 @@ export function VerificationScreen() {
           <View style={styles.inputContainer}>
             <TextInput
               style={styles.codeInput}
-              placeholder="Enter verification code"
+              placeholder="Enter 6-digit code"
+              placeholderTextColor="#999"
               value={code}
               onChangeText={setCode}
               keyboardType="number-pad"
@@ -220,13 +221,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     fontSize: 18,
     textAlign: "center",
-    letterSpacing: 8,
+    letterSpacing: 2,
     backgroundColor: "#f9f9f9",
+    paddingHorizontal: 16,
   },
   verifyButton: {
     width: "80%",
     height: 55,
-    backgroundColor: "#4285F4",
+    backgroundColor: "#27ae60",
     borderRadius: 8,
     justifyContent: "center",
     alignItems: "center",
@@ -238,7 +240,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   disabledButton: {
-    backgroundColor: "#a0c4ff",
+    backgroundColor: "#a8d5a8",
   },
   resendContainer: {
     flexDirection: "row",
@@ -252,7 +254,7 @@ const styles = StyleSheet.create({
   resendButton: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#4285F4",
+    color: "#27ae60",
   },
   countdownText: {
     fontSize: 14,
@@ -266,7 +268,7 @@ const styles = StyleSheet.create({
     padding: 10,
   },
   backButtonText: {
-    color: "#666",
+    color: "#333",
     fontSize: 16,
   },
 });

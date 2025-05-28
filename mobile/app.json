@@ -45,10 +45,15 @@
       "favicon": "./assets/favicon.png"
     },
     "scheme": "foodrecognition",
+    "packagerOpts": {
+      "sourceExts": ["js", "jsx", "ts", "tsx", "json"],
+      "config": "metro.config.js"
+    },
     "extra": {
       "eas": {
         "projectId": "your-project-id"
-      }
+      },
+      "enableNetworkDebug": true
     }
   }
 }

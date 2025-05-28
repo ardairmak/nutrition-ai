@@ -15,12 +15,17 @@ app.use(helmet());
 app.use(compression());
 app.use(
   cors({
-    origin: "*",
+    origin: process.env.ALLOWED_ORIGINS?.split(",") || [
+      "http://localhost:19006",
+      "http://localhost:8081",
+    ],
     credentials: true,
   })
 );
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+// Increase JSON payload limit to 50MB for image uploads
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // Set up session (required for passport OAuth flows)
 app.use(
