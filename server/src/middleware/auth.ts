@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from "express";
+import { Request, Response, NextFunction, RequestHandler } from "express";
 import jwt from "jsonwebtoken";
 import { logger } from "../utils/logger";
 import { prisma } from "../db";
@@ -10,6 +10,20 @@ export interface AuthRequest extends Request {
     email: string;
   };
 }
+
+// Wrapper for controllers using AuthRequest type
+export const withAuth = (
+  handler: (
+    req: AuthRequest,
+    res: Response,
+    next?: NextFunction
+  ) => Promise<any>
+): RequestHandler => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    // Cast standard Request to AuthRequest
+    return handler(req as AuthRequest, res, next);
+  };
+};
 
 // Middleware to authenticate JWT tokens
 export const authenticate = async (

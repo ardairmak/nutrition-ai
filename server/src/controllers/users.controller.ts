@@ -1,6 +1,17 @@
+import { Request, Response } from "express";
+import { AuthRequest } from "../middleware/auth";
+import { prisma } from "../db";
+
 // Specific controller to force update goals for Google users
-export async function forceUpdateGoals(req: Request, res: Response) {
+export async function forceUpdateGoals(req: AuthRequest, res: Response) {
   try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required",
+      });
+    }
+
     const userId = req.user.id;
     const { fitnessGoals } = req.body;
 
