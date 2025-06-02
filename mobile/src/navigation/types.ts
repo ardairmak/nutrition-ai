@@ -28,6 +28,7 @@ export type RootStackParamList = {
   ActivityLevel: undefined;
   NotificationSettings: undefined;
   FriendProfile: { friend: Friend };
+  AIChat: undefined;
 };
 
 export type MainTabsParamList = {

@@ -10,6 +10,7 @@ import {
   Dimensions,
   SafeAreaView,
   Modal,
+  Image,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
@@ -17,6 +18,7 @@ import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../navigation/types";
 import { useAuth } from "../contexts/AuthContext";
 import userService from "../services/userService";
+import { S3Image } from "../components/S3Image";
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -46,6 +48,7 @@ interface Meal {
   carbs: number;
   fat: number;
   timestamp: number;
+  imageUrl?: string;
 }
 
 interface MealSection {
@@ -61,6 +64,7 @@ interface ServerMeal {
   totalProtein: number;
   totalCarbs: number;
   totalFat: number;
+  imageUrl?: string;
   consumedAt: string;
   foodItems: any[];
 }
@@ -162,6 +166,7 @@ export function JournalScreen() {
             carbs: meal.totalCarbs,
             fat: meal.totalFat,
             timestamp: new Date(meal.consumedAt).getTime(),
+            imageUrl: meal.imageUrl,
           });
 
           return acc;
@@ -351,20 +356,34 @@ export function JournalScreen() {
                     style={styles.mealCard}
                     onPress={() => handleMealPress(meal)}
                   >
-                    <View style={styles.mealHeader}>
-                      <Text style={styles.mealName}>{meal.name}</Text>
-                      <Text style={styles.mealTime}>
-                        {new Date(meal.timestamp).toLocaleTimeString()}
-                      </Text>
-                    </View>
-                    <View style={styles.mealDetails}>
-                      <Text style={styles.mealCalories}>
-                        {meal.calories} calories
-                      </Text>
-                      <View style={styles.macrosContainer}>
-                        <Text style={styles.macroText}>P: {meal.protein}g</Text>
-                        <Text style={styles.macroText}>C: {meal.carbs}g</Text>
-                        <Text style={styles.macroText}>F: {meal.fat}g</Text>
+                    <View style={styles.mealCardContent}>
+                      {meal.imageUrl && (
+                        <S3Image
+                          imageUrl={meal.imageUrl}
+                          style={styles.mealImage}
+                        />
+                      )}
+                      <View style={styles.mealInfo}>
+                        <View style={styles.mealHeader}>
+                          <Text style={styles.mealName}>{meal.name}</Text>
+                          <Text style={styles.mealTime}>
+                            {new Date(meal.timestamp).toLocaleTimeString()}
+                          </Text>
+                        </View>
+                        <View style={styles.mealDetails}>
+                          <Text style={styles.mealCalories}>
+                            {meal.calories} calories
+                          </Text>
+                          <View style={styles.macrosContainer}>
+                            <Text style={styles.macroText}>
+                              P: {meal.protein}g
+                            </Text>
+                            <Text style={styles.macroText}>
+                              C: {meal.carbs}g
+                            </Text>
+                            <Text style={styles.macroText}>F: {meal.fat}g</Text>
+                          </View>
+                        </View>
                       </View>
                     </View>
                   </TouchableOpacity>
@@ -378,53 +397,79 @@ export function JournalScreen() {
       {selectedMeal && (
         <Modal
           visible={showMealDetails}
-          animationType="slide"
+          animationType="fade"
           transparent={true}
           onRequestClose={closeMealDetails}
         >
-          <View style={styles.modalContainer}>
-            <View style={styles.modalContent}>
+          <TouchableOpacity
+            style={styles.modalContainer}
+            activeOpacity={1}
+            onPress={closeMealDetails}
+          >
+            <TouchableOpacity
+              style={styles.modalContent}
+              activeOpacity={1}
+              onPress={(e) => e.stopPropagation()}
+            >
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>{selectedMeal.name}</Text>
-                <TouchableOpacity onPress={closeMealDetails}>
+                <TouchableOpacity
+                  onPress={closeMealDetails}
+                  style={styles.closeButton}
+                >
                   <Icon name="close" size={24} color="#666666" />
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.mealDetailsContainer}>
-                <Text style={styles.mealDetailsTime}>
-                  {new Date(selectedMeal.timestamp).toLocaleString()}
-                </Text>
+              {selectedMeal.imageUrl && (
+                <S3Image
+                  imageUrl={selectedMeal.imageUrl}
+                  style={styles.modalImage}
+                />
+              )}
 
-                <View style={styles.nutritionSummary}>
-                  <View style={styles.nutritionItem}>
-                    <Text style={styles.nutritionValue}>
-                      {selectedMeal.calories}
-                    </Text>
-                    <Text style={styles.nutritionLabel}>Calories</Text>
-                  </View>
-                  <View style={styles.nutritionItem}>
-                    <Text style={styles.nutritionValue}>
-                      {selectedMeal.protein}g
-                    </Text>
-                    <Text style={styles.nutritionLabel}>Protein</Text>
-                  </View>
-                  <View style={styles.nutritionItem}>
-                    <Text style={styles.nutritionValue}>
-                      {selectedMeal.carbs}g
-                    </Text>
-                    <Text style={styles.nutritionLabel}>Carbs</Text>
-                  </View>
-                  <View style={styles.nutritionItem}>
-                    <Text style={styles.nutritionValue}>
-                      {selectedMeal.fat}g
-                    </Text>
-                    <Text style={styles.nutritionLabel}>Fat</Text>
+              <View style={styles.mealDetailsContainer}>
+                <View style={styles.timeContainer}>
+                  <Icon name="clock-outline" size={20} color="#666666" />
+                  <Text style={styles.mealDetailsTime}>
+                    {new Date(selectedMeal.timestamp).toLocaleString()}
+                  </Text>
+                </View>
+
+                <View style={styles.nutritionCard}>
+                  <Text style={styles.nutritionTitle}>
+                    Nutrition Information
+                  </Text>
+                  <View style={styles.nutritionGrid}>
+                    <View style={styles.nutritionItem}>
+                      <Text style={styles.nutritionValue}>
+                        {selectedMeal.calories}
+                      </Text>
+                      <Text style={styles.nutritionLabel}>Calories</Text>
+                    </View>
+                    <View style={styles.nutritionItem}>
+                      <Text style={styles.nutritionValue}>
+                        {selectedMeal.protein}g
+                      </Text>
+                      <Text style={styles.nutritionLabel}>Protein</Text>
+                    </View>
+                    <View style={styles.nutritionItem}>
+                      <Text style={styles.nutritionValue}>
+                        {selectedMeal.carbs}g
+                      </Text>
+                      <Text style={styles.nutritionLabel}>Carbs</Text>
+                    </View>
+                    <View style={styles.nutritionItem}>
+                      <Text style={styles.nutritionValue}>
+                        {selectedMeal.fat}g
+                      </Text>
+                      <Text style={styles.nutritionLabel}>Fat</Text>
+                    </View>
                   </View>
                 </View>
               </View>
-            </View>
-          </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
         </Modal>
       )}
     </SafeAreaView>
@@ -537,20 +582,32 @@ const styles = StyleSheet.create({
   mealCard: {
     backgroundColor: "#F8F8F8",
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     borderWidth: 1,
     borderColor: "#EEEEEE",
   },
-  mealHeader: {
+  mealCardContent: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
+  },
+  mealImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  mealInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mealHeader: {
     marginBottom: 8,
   },
   mealName: {
     fontSize: 18,
     fontWeight: "600",
     color: "#000000",
+    marginBottom: 4,
   },
   mealTime: {
     fontSize: 14,
@@ -593,47 +650,95 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0, 0, 0, 0.5)",
+    padding: 20,
   },
   modalContent: {
     backgroundColor: "#FFFFFF",
-    padding: 20,
-    borderRadius: 16,
-    width: "80%",
+    borderRadius: 20,
+    width: "100%",
     maxWidth: 400,
+    maxHeight: "80%",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
   },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 16,
+    padding: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
   },
   modalTitle: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: "bold",
     color: "#000000",
+    flex: 1,
+    marginRight: 16,
+  },
+  closeButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: "#F8F8F8",
+  },
+  modalImage: {
+    width: "100%",
+    height: 200,
+    borderRadius: 0,
   },
   mealDetailsContainer: {
-    gap: 16,
+    padding: 20,
+  },
+  timeContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F8F8F8",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
   },
   mealDetailsTime: {
     fontSize: 16,
+    color: "#333333",
+    marginLeft: 8,
+    fontWeight: "500",
+  },
+  nutritionCard: {
+    backgroundColor: "#F8F8F8",
+    padding: 20,
+    borderRadius: 16,
+  },
+  nutritionTitle: {
+    fontSize: 18,
     fontWeight: "bold",
     color: "#000000",
+    marginBottom: 16,
+    textAlign: "center",
   },
-  nutritionSummary: {
+  nutritionGrid: {
     flexDirection: "row",
-    gap: 12,
+    justifyContent: "space-around",
   },
   nutritionItem: {
-    flexDirection: "row",
     alignItems: "center",
+    flex: 1,
   },
   nutritionValue: {
-    fontSize: 16,
+    fontSize: 20,
+    fontWeight: "bold",
     color: "#000000",
+    marginBottom: 4,
   },
   nutritionLabel: {
     fontSize: 14,
     color: "#666666",
+    fontWeight: "500",
   },
 });

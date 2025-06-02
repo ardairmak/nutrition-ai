@@ -18,6 +18,7 @@ import userService from "../services/userService";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { RootStackParamList } from "../navigation/types";
+import { S3Image } from "../components/S3Image";
 
 type Friend = {
   id: string;
@@ -141,8 +142,8 @@ export function FriendsScreen() {
     >
       <View style={styles.friendInfo}>
         {friend.profilePicture ? (
-          <Image
-            source={{ uri: friend.profilePicture }}
+          <S3Image
+            imageUrl={friend.profilePicture}
             style={styles.profilePicture}
           />
         ) : (
@@ -172,8 +173,8 @@ export function FriendsScreen() {
     <View key={request.id} style={styles.friendRequestItem}>
       <View style={styles.friendInfo}>
         {request.user.profilePicture ? (
-          <Image
-            source={{ uri: request.user.profilePicture }}
+          <S3Image
+            imageUrl={request.user.profilePicture}
             style={styles.profilePicture}
           />
         ) : (
@@ -211,8 +212,8 @@ export function FriendsScreen() {
     <View key={user.id} style={styles.searchResultItem}>
       <View style={styles.friendInfo}>
         {user.profilePicture ? (
-          <Image
-            source={{ uri: user.profilePicture }}
+          <S3Image
+            imageUrl={user.profilePicture}
             style={styles.profilePicture}
           />
         ) : (
@@ -345,7 +346,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   searchButton: {
-    backgroundColor: "#4285F4",
+    backgroundColor: "#000000",
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 8,

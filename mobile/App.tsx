@@ -20,10 +20,12 @@ export default function App() {
         const success = await notificationService.initialize();
 
         if (success) {
-          // Schedule smart daily reminders
-          await notificationService.scheduleSmartDailyReminders();
+          console.log("✅ Notification service initialized successfully");
+          // DO NOT automatically schedule notifications on startup!
+          // Notifications should only be scheduled when user saves settings
         }
       } catch (error) {
+        console.error("Failed to initialize notifications:", error);
         // Don't throw - let the app continue without notifications
       }
     };

@@ -35,11 +35,11 @@ export async function recordUserLogin(
   );
 
   if (!hasLoggedInToday) {
-    // Record today's login
+    // Record today's login using start of day to avoid unique constraint issues
     await prisma.userLoginHistory.create({
       data: {
         userId,
-        loginDate: today,
+        loginDate: todayStart, // Use start of day instead of current time
       },
     });
 
@@ -62,8 +62,8 @@ export async function recordUserLogin(
       where: { id: userId },
       data: {
         loginStreak: newStreak,
-        lastStreakUpdate: today,
-        lastLogin: today,
+        lastStreakUpdate: todayStart, // Also use start of day for consistency
+        lastLogin: today, // Keep actual login time for lastLogin
       },
     });
 
@@ -204,8 +204,6 @@ export async function getRecentFoodEntries(userId: string, limit: number = 5) {
   });
 
   return recentEntries.map((entry) => {
-    // Return null for imageUri since we don't store actual photos
-    // The frontend will show an icon placeholder instead
     return {
       id: entry.id,
       name: entry.mealName,
@@ -214,7 +212,7 @@ export async function getRecentFoodEntries(userId: string, limit: number = 5) {
       carbs: entry.totalCarbs,
       fat: entry.totalFat,
       consumedAt: entry.consumedAt,
-      imageUri: null, // No photo available, frontend will show icon
+      imageUri: entry.imageUrl, // Return the actual S3 image URL
       progress: Math.min(Math.round((entry.totalCalories / 2000) * 100), 100),
     };
   });

@@ -34,6 +34,20 @@ router.get(
   withAuth(userController.getDashboardData)
 );
 
+// Get login history for last 7 days
+router.get(
+  "/login-history",
+  authenticate,
+  withAuth(userController.getLoginHistory)
+);
+
+// Recalculate calorie goals
+router.post(
+  "/recalculate-goals",
+  authenticate,
+  withAuth(userController.recalculateCalorieGoals)
+);
+
 // Log a meal
 router.post("/meals", authenticate, withAuth(userController.logMeal));
 
@@ -42,5 +56,17 @@ router.get("/meals", authenticate, withAuth(userController.getMeals));
 
 // Search users
 router.get("/search", authenticate, withAuth(userController.searchUsers));
+
+// Notification settings routes
+router.get(
+  "/notification-settings",
+  authenticate,
+  userController.getNotificationSettings
+);
+router.put(
+  "/notification-settings",
+  authenticate,
+  userController.updateNotificationSettings
+);
 
 export default router;

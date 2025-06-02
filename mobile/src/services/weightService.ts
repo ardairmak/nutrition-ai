@@ -141,6 +141,12 @@ const weightService = {
     weightEntries: WeightEntry[],
     timeframe: string
   ): any => {
+    console.log(
+      "🔍 formatWeightDataForChart called with timeframe:",
+      timeframe
+    );
+    console.log("🔍 Number of entries:", weightEntries.length);
+
     // Sort entries by date
     const sortedEntries = [...weightEntries].sort((a, b) => {
       return (
@@ -161,16 +167,16 @@ const weightService = {
 
     switch (timeframe) {
       case "1W":
-        // Show each day
+        // Show all entries with M/d format (no year)
         sortedEntries.forEach((entry) => {
           const date = parseISO(entry.recordedAt);
-          labels.push(format(date, "EEE")); // Day name (Mon, Tue, etc.)
+          labels.push(format(date, "M/d")); // Month/day format without year
           data.push(entry.weight);
         });
         break;
 
       case "1M":
-        // Group by week
+        // Use just week numbers, max 2 labels
         const weeks = new Map<number, { sum: number; count: number }>();
         sortedEntries.forEach((entry) => {
           const date = parseISO(entry.recordedAt);
@@ -187,18 +193,20 @@ const weightService = {
           }
         });
 
-        // Convert to arrays
-        [...weeks.entries()]
-          .sort(([a], [b]) => a - b)
-          .forEach(([time, { sum, count }]) => {
-            const date = new Date(time);
-            labels.push(`Week ${format(date, "w")}`);
-            data.push(sum / count); // Average weight for the week
+        // Convert to arrays with max 2 labels
+        const weekEntries = [...weeks.entries()].sort(([a], [b]) => a - b);
+        const monthStep = Math.max(1, Math.floor(weekEntries.length / 2));
+
+        weekEntries
+          .filter((_, index) => index % monthStep === 0)
+          .forEach(([time, { sum, count }], index) => {
+            labels.push(`W${index + 1}`); // Just "W1", "W2"
+            data.push(sum / count);
           });
         break;
 
       case "3M":
-        // Group by month
+        // Use just month numbers, max 2 labels
         const months = new Map<string, { sum: number; count: number }>();
         sortedEntries.forEach((entry) => {
           const date = parseISO(entry.recordedAt);
@@ -213,17 +221,23 @@ const weightService = {
           }
         });
 
-        // Convert to arrays
-        [...months.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
+        // Convert to arrays - max 2 labels
+        const monthEntries = [...months.entries()].sort(([a], [b]) =>
+          a.localeCompare(b)
+        );
+        const threeMonthStep = Math.max(1, Math.floor(monthEntries.length / 2));
+
+        monthEntries
+          .filter((_, index) => index % threeMonthStep === 0)
           .forEach(([key, { sum, count }]) => {
-            labels.push(format(parseISO(`${key}-01`), "MMM"));
-            data.push(sum / count); // Average weight for the month
+            const monthNum = format(parseISO(`${key}-01`), "M"); // Just month number like "12"
+            labels.push(monthNum);
+            data.push(sum / count);
           });
         break;
 
       case "1Y":
-        // Group by every other month
+        // Use just month numbers, max 2 labels
         const yearMonths = new Map<string, { sum: number; count: number }>();
         sortedEntries.forEach((entry) => {
           const date = parseISO(entry.recordedAt);
@@ -238,25 +252,34 @@ const weightService = {
           }
         });
 
-        // Show every other month
-        [...yearMonths.entries()]
-          .sort(([a], [b]) => a.localeCompare(b))
-          .filter((_, index) => index % 2 === 0) // Take every other month
+        // Show max 2 labels for whole year
+        const yearEntries = [...yearMonths.entries()].sort(([a], [b]) =>
+          a.localeCompare(b)
+        );
+        const yearStep = Math.max(1, Math.floor(yearEntries.length / 2));
+
+        yearEntries
+          .filter((_, index) => index % yearStep === 0)
           .forEach(([key, { sum, count }]) => {
-            labels.push(format(parseISO(`${key}-01`), "MMM"));
-            data.push(sum / count); // Average weight for the month
+            const monthNum = format(parseISO(`${key}-01`), "M"); // Just month number
+            labels.push(monthNum);
+            data.push(sum / count);
           });
         break;
 
       default:
-        // Default: show all entries
+        // Default: show all entries with M/d format (no year)
+        console.log("🔍 Using default case for formatting");
         sortedEntries.forEach((entry) => {
           const date = parseISO(entry.recordedAt);
-          labels.push(format(date, "MM/dd"));
+          const formatted = format(date, "M/d");
+          console.log("🔍 Date:", entry.recordedAt, "→", formatted);
+          labels.push(formatted); // Month/day format without year
           data.push(entry.weight);
         });
     }
 
+    console.log("🔍 Final labels:", labels);
     return {
       labels,
       datasets: [{ data }],

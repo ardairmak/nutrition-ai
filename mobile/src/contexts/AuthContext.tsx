@@ -19,6 +19,7 @@ export type User = {
   fitnessGoals?: string[];
   height?: number;
   weight?: number;
+  targetWeight?: number;
   gender?: string;
   dateOfBirth?: string;
   activityLevel?: string;

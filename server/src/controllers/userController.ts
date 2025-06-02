@@ -198,6 +198,7 @@ export const updateUserProfile = async (req: Request, res: Response) => {
       proteinGoal,
       carbsGoal,
       fatGoal,
+      profilePicture,
       // Handle unit information
       heightUnit,
       weightUnit,
@@ -316,6 +317,11 @@ export const updateUserProfile = async (req: Request, res: Response) => {
       updateData.fatGoal = parseFloat(fatGoal.toString());
     }
 
+    // Handle profile picture
+    if (profilePicture) {
+      updateData.profilePicture = profilePicture;
+    }
+
     // Update user profile
     const updatedUser = await prisma.user.update({
       where: {
@@ -341,8 +347,28 @@ export const updateUserProfile = async (req: Request, res: Response) => {
         carbsGoal: true,
         fatGoal: true,
         profileSetupComplete: true,
+        profilePicture: true,
       },
     });
+
+    // If weight was updated, also create a weight log entry to keep data in sync
+    if (updateData.weight !== undefined) {
+      try {
+        await prisma.weightHistory.create({
+          data: {
+            userId,
+            weight: updateData.weight,
+            recordedAt: new Date(),
+          },
+        });
+        logger.info(
+          `Weight log entry created for profile update: ${updateData.weight}kg for user ${userId}`
+        );
+      } catch (weightLogError) {
+        logger.error(`Failed to create weight log entry: ${weightLogError}`);
+        // Don't fail the entire request if weight logging fails
+      }
+    }
 
     return res.json({
       message: "Profile updated successfully",
@@ -624,22 +650,49 @@ export async function recordLoginStreak(req: AuthRequest, res: Response) {
     const userId = req.user?.id;
 
     if (!userId) {
+      logger.error("recordLoginStreak: User not authenticated");
       return res
         .status(401)
         .json({ success: false, error: "User not authenticated" });
     }
 
+    logger.info(`Recording login streak for user: ${userId}`);
+
     const result = await recordUserLogin(userId);
+
+    logger.info(
+      `Login streak recorded successfully for user ${userId}: streak = ${result.streak}`
+    );
 
     return res.status(200).json({
       success: true,
       streak: result.streak,
     });
   } catch (error) {
-    console.error("Error recording login streak:", error);
+    logger.error("Error recording login streak:", error);
+
+    // Check if it's a database constraint error
+    if (error instanceof Error) {
+      if (
+        error.message.includes("unique constraint") ||
+        error.message.includes("duplicate")
+      ) {
+        logger.error(
+          "Unique constraint violation in login streak recording - user may have already logged in today"
+        );
+        // Still return success since the constraint violation means they already logged in today
+        return res.status(200).json({
+          success: true,
+          streak: 0, // We'll need to fetch their actual streak
+          message: "Login already recorded for today",
+        });
+      }
+    }
+
     return res.status(500).json({
       success: false,
       error: "Failed to record login streak",
+      details: error instanceof Error ? error.message : String(error),
     });
   }
 }
@@ -708,6 +761,7 @@ export async function logMeal(req: AuthRequest, res: Response) {
       totalProtein,
       totalCarbs,
       totalFat,
+      imageUrl,
       consumedAt,
       foodItems,
       gptAnalysisJson,
@@ -731,6 +785,7 @@ export async function logMeal(req: AuthRequest, res: Response) {
         totalProtein: parseFloat(totalProtein || 0),
         totalCarbs: parseFloat(totalCarbs || 0),
         totalFat: parseFloat(totalFat || 0),
+        imageUrl: imageUrl || null,
         consumedAt: consumedAt ? new Date(consumedAt) : new Date(),
         gptAnalysisJson: gptAnalysisJson || undefined,
         foodItems: {
@@ -882,5 +937,376 @@ export const searchUsers = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error(`Error searching users: ${error}`);
     return res.status(500).json({ error: "Failed to search users" });
+  }
+};
+
+/**
+ * Get login history for the last 7 days
+ * @param req Express request
+ * @param res Express response
+ */
+export async function getLoginHistory(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, error: "User not authenticated" });
+    }
+
+    // Calculate date range for last 7 days
+    const today = new Date();
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(today.getDate() - 6); // Include today, so -6 for 7 days total
+    sevenDaysAgo.setHours(0, 0, 0, 0); // Start of day
+
+    // Get login history for the last 7 days
+    const loginHistory = await prisma.userLoginHistory.findMany({
+      where: {
+        userId,
+        loginDate: {
+          gte: sevenDaysAgo,
+          lte: today,
+        },
+      },
+      select: {
+        loginDate: true,
+      },
+      orderBy: {
+        loginDate: "asc",
+      },
+    });
+
+    // Convert to array of date strings for easier frontend processing
+    const loginDates = loginHistory.map((entry) => {
+      const date = new Date(entry.loginDate);
+      return date.toISOString().split("T")[0]; // YYYY-MM-DD format
+    });
+
+    return res.status(200).json({
+      success: true,
+      loginDates,
+    });
+  } catch (error) {
+    console.error("Error fetching login history:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to fetch login history",
+    });
+  }
+}
+
+/**
+ * Calculate BMR using Mifflin-St Jeor equation
+ */
+function calculateBMR(
+  gender: string,
+  age: number,
+  height: number,
+  weight: number
+): number {
+  if (gender === "male") {
+    return 10 * weight + 6.25 * height - 5 * age + 5;
+  } else {
+    return 10 * weight + 6.25 * height - 5 * age - 161;
+  }
+}
+
+/**
+ * Get activity multiplier based on activity level
+ */
+function getActivityMultiplier(activityLevel: string): number {
+  switch (activityLevel) {
+    case "sedentary":
+      return 1.2;
+    case "light":
+    case "lightly_active":
+      return 1.375;
+    case "moderate":
+    case "moderately_active":
+      return 1.55;
+    case "active":
+    case "very_active":
+      return 1.725;
+    case "extremely_active":
+      return 1.9;
+    default:
+      return 1.55; // Default to moderate
+  }
+}
+
+/**
+ * Determine weight change rate based on fitness goals
+ */
+function getWeightChangeRate(fitnessGoals: string[]): number {
+  if (
+    fitnessGoals.includes("weight_loss") ||
+    fitnessGoals.includes("lose_weight")
+  ) {
+    return -0.5; // Lose 0.5 kg per week
+  } else if (
+    fitnessGoals.includes("weight_gain") ||
+    fitnessGoals.includes("gain_weight")
+  ) {
+    return 0.5; // Gain 0.5 kg per week
+  } else if (fitnessGoals.includes("muscle_gain")) {
+    return 0.25; // Slight weight gain for muscle building
+  }
+  return 0; // Maintain weight
+}
+
+/**
+ * Calculate daily calorie goal based on user metrics
+ */
+function calculateDailyCalorieGoal(user: any) {
+  const {
+    gender,
+    dateOfBirth,
+    height,
+    weight,
+    activityLevel,
+    fitnessGoals,
+    targetWeight,
+  } = user;
+
+  // Calculate age from date of birth
+  let age = 30; // Default
+  if (dateOfBirth) {
+    const birthDate = new Date(dateOfBirth);
+    const today = new Date();
+    age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (
+      monthDiff < 0 ||
+      (monthDiff === 0 && today.getDate() < birthDate.getDate())
+    ) {
+      age--;
+    }
+  }
+
+  // Use default values if missing
+  const userGender = gender || "male";
+  const userHeight = height || 175;
+  const userWeight = weight || 70;
+  const userActivityLevel = activityLevel || "moderate";
+  const userFitnessGoals = fitnessGoals || [];
+
+  // Calculate BMR
+  const bmr = calculateBMR(userGender, age, userHeight, userWeight);
+
+  // Calculate TDEE
+  const multiplier = getActivityMultiplier(userActivityLevel);
+  const tdee = Math.round(bmr * multiplier);
+
+  // Determine weight change rate
+  let weightChangeRate = getWeightChangeRate(userFitnessGoals);
+
+  // If target weight is specified, adjust rate based on difference
+  if (targetWeight && targetWeight !== userWeight) {
+    const weightDifference = targetWeight - userWeight;
+    if (Math.abs(weightDifference) > 0.1) {
+      weightChangeRate = weightDifference > 0 ? 0.5 : -0.5;
+    }
+  }
+
+  // Calculate calorie adjustment (1 kg = ~7700 calories)
+  const calorieAdjustment = Math.round((weightChangeRate * 7700) / 7);
+
+  // Calculate daily calorie goal
+  const dailyCalorieGoal = Math.max(1200, tdee + calorieAdjustment);
+
+  // Calculate macro goals
+  const proteinGoal = Math.round((dailyCalorieGoal * 0.25) / 4);
+  const carbsGoal = Math.round((dailyCalorieGoal * 0.45) / 4);
+  const fatGoal = Math.round((dailyCalorieGoal * 0.25) / 9);
+
+  return {
+    bmr,
+    tdee,
+    dailyCalorieGoal,
+    proteinGoal,
+    carbsGoal,
+    fatGoal,
+    calorieAdjustment,
+    weightChangeRate,
+  };
+}
+
+/**
+ * Recalculate and update user's calorie goals
+ * @param req Express request
+ * @param res Express response
+ */
+export async function recalculateCalorieGoals(req: AuthRequest, res: Response) {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res
+        .status(401)
+        .json({ success: false, error: "User not authenticated" });
+    }
+
+    // Get current user data
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        gender: true,
+        dateOfBirth: true,
+        height: true,
+        weight: true,
+        targetWeight: true,
+        activityLevel: true,
+        fitnessGoals: true,
+        dailyCalorieGoal: true,
+        proteinGoal: true,
+        carbsGoal: true,
+        fatGoal: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
+    }
+
+    // Calculate new goals
+    const calculation = calculateDailyCalorieGoal(user);
+
+    // Update user with new goals
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        dailyCalorieGoal: calculation.dailyCalorieGoal,
+        proteinGoal: calculation.proteinGoal,
+        carbsGoal: calculation.carbsGoal,
+        fatGoal: calculation.fatGoal,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Calorie goals updated successfully",
+      calculation,
+      goals: {
+        dailyCalorieGoal: calculation.dailyCalorieGoal,
+        proteinGoal: calculation.proteinGoal,
+        carbsGoal: calculation.carbsGoal,
+        fatGoal: calculation.fatGoal,
+      },
+    });
+  } catch (error) {
+    console.error("Error recalculating calorie goals:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to recalculate calorie goals",
+    });
+  }
+}
+
+// Get user's notification settings
+export const getNotificationSettings = async (req: Request, res: Response) => {
+  try {
+    const userId = (req.user as { id: string }).id;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        notificationSettings: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Return notification settings or default settings if none exist
+    const defaultSettings = {
+      mealReminders: {
+        enabled: true,
+        times: [
+          { id: "1", hour: 8, minute: 0, enabled: true },
+          { id: "2", hour: 13, minute: 0, enabled: true },
+          { id: "3", hour: 19, minute: 0, enabled: true },
+        ],
+        weekdaysOnly: false,
+      },
+      waterReminders: {
+        enabled: false,
+        interval: 2,
+        startTime: { hour: 8, minute: 0 },
+        endTime: { hour: 22, minute: 0 },
+        weekdaysOnly: false,
+      },
+      weighInReminders: {
+        enabled: false,
+        time: { hour: 7, minute: 0 },
+        frequency: "weekly",
+        weekdaysOnly: false,
+      },
+      streakReminders: {
+        enabled: true,
+        time: { hour: 21, minute: 0 },
+        onlyWhenMissing: true,
+      },
+      motivationalMessages: {
+        enabled: true,
+        frequency: "daily",
+      },
+    };
+
+    return res.json({
+      success: true,
+      settings: user.notificationSettings || defaultSettings,
+    });
+  } catch (error) {
+    logger.error(`Error getting notification settings: ${error}`);
+    return res
+      .status(500)
+      .json({ error: "Failed to get notification settings" });
+  }
+};
+
+// Update user's notification settings
+export const updateNotificationSettings = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const userId = (req.user as { id: string }).id;
+    const { settings } = req.body;
+
+    if (!settings) {
+      return res
+        .status(400)
+        .json({ error: "Notification settings are required" });
+    }
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        notificationSettings: settings,
+        updatedAt: new Date(),
+      },
+      select: {
+        notificationSettings: true,
+      },
+    });
+
+    logger.info(`Notification settings updated for user ${userId}`);
+
+    return res.json({
+      success: true,
+      message: "Notification settings updated successfully",
+      settings: updatedUser.notificationSettings,
+    });
+  } catch (error) {
+    logger.error(`Error updating notification settings: ${error}`);
+    return res
+      .status(500)
+      .json({ error: "Failed to update notification settings" });
   }
 };

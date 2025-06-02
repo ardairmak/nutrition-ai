@@ -16,6 +16,7 @@ import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { FoodAnalysis, FoodItem } from "../services/imageService";
 import { userService } from "../services";
 import EditFoodItemModal from "./EditFoodItemModal";
+import { uploadService } from "../services/uploadService";
 
 interface NutritionPopupProps {
   visible: boolean;
@@ -116,6 +117,22 @@ const NutritionPopup: React.FC<NutritionPopupProps> = ({
     setIsLogging(true);
 
     try {
+      let imageUrl = null;
+
+      // Upload image to S3 if we have a photo
+      if (photoUri) {
+        console.log("Uploading meal image to S3...");
+        const uploadResult = await uploadService.uploadMealImage(photoUri);
+
+        if (uploadResult.success && uploadResult.imageUrl) {
+          imageUrl = uploadResult.imageUrl;
+          console.log("Meal image uploaded successfully:", imageUrl);
+        } else {
+          console.warn("Failed to upload meal image:", uploadResult.error);
+          // Continue with meal logging even if image upload fails
+        }
+      }
+
       // Prepare meal data
       const mealData = {
         mealType: mealType,
@@ -125,6 +142,7 @@ const NutritionPopup: React.FC<NutritionPopupProps> = ({
         totalProtein: scaledProtein,
         totalCarbs: scaledCarbs,
         totalFat: scaledFat,
+        imageUrl: imageUrl, // Add the S3 image URL
         foodItems: displayData.foodItems.map((item) => ({
           name: item.name,
           portionSize: item.portionSize,

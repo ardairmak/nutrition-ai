@@ -779,6 +779,70 @@ const userService = {
       return { success: false, error: "Failed to fetch dashboard data" };
     }
   },
+
+  // Get user's notification settings
+  getNotificationSettings: async (): Promise<ApiResponse> => {
+    try {
+      console.log("UserService: Getting notification settings");
+      const response = await apiCall(
+        "/users/notification-settings",
+        "GET",
+        null,
+        true
+      );
+
+      if (response.success) {
+        console.log(
+          "UserService: Retrieved notification settings successfully"
+        );
+        return response;
+      } else {
+        console.error(
+          "UserService: Failed to get notification settings:",
+          response.error
+        );
+        return response;
+      }
+    } catch (error) {
+      console.error("UserService: Error in getNotificationSettings:", error);
+      return {
+        success: false,
+        error:
+          "An unexpected error occurred while retrieving notification settings",
+      };
+    }
+  },
+
+  // Update user's notification settings
+  updateNotificationSettings: async (settings: any): Promise<ApiResponse> => {
+    try {
+      console.log("UserService: Updating notification settings");
+      const response = await apiCall(
+        "/users/notification-settings",
+        "PUT",
+        { settings },
+        true
+      );
+
+      if (response.success) {
+        console.log("UserService: Notification settings updated successfully");
+        return response;
+      } else {
+        console.error(
+          "UserService: Failed to update notification settings:",
+          response.error
+        );
+        return response;
+      }
+    } catch (error) {
+      console.error("UserService: Error in updateNotificationSettings:", error);
+      return {
+        success: false,
+        error:
+          "An unexpected error occurred while updating notification settings",
+      };
+    }
+  },
 };
 
 export default userService;

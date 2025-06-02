@@ -29,7 +29,7 @@ import { FoodAnalysis } from "../services/imageService";
 import NutritionPopup from "../components/NutritionPopup";
 import userService from "../services/userService";
 
-type ScanMode = "food" | "label" | "gallery";
+type ScanMode = "food" | "gallery";
 type CameraScreenRouteProp = RouteProp<RootStackParamList, "Camera">;
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
@@ -252,21 +252,6 @@ export function CameraScreen() {
             color={scanMode === "food" ? "#000" : "#777"}
           />
           <Text style={styles.scanOptionText}>Food scan</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.scanOption,
-            scanMode === "label" ? styles.scanOptionActive : {},
-          ]}
-          onPress={() => setScanMode("label")}
-        >
-          <Icon
-            name="tag-text"
-            size={24}
-            color={scanMode === "label" ? "#000" : "#777"}
-          />
-          <Text style={styles.scanOptionText}>Food label</Text>
         </TouchableOpacity>
 
         <TouchableOpacity

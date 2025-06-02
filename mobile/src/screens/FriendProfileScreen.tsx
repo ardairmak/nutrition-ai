@@ -14,6 +14,7 @@ import { RouteProp, useRoute, useNavigation } from "@react-navigation/native";
 import { RootStackParamList, Friend } from "../navigation/types";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import userService from "../services/userService";
+import { S3Image } from "../components/S3Image";
 
 interface FriendStats {
   joinDate: string;
@@ -169,8 +170,8 @@ const FriendProfileScreen: React.FC = () => {
           {/* Profile Header */}
           <View style={styles.profileHeader}>
             {friend.profilePicture ? (
-              <Image
-                source={{ uri: friend.profilePicture }}
+              <S3Image
+                imageUrl={friend.profilePicture}
                 style={styles.profilePicture}
               />
             ) : (

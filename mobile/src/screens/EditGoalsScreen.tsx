@@ -20,44 +20,6 @@ import { useAuth } from "../contexts/AuthContext";
 import userService from "../services/userService";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 
-const ACTIVITY_LEVELS = [
-  {
-    value: "sedentary",
-    label: "Sedentary",
-    description: "Little to no exercise",
-    icon: "chair-rolling",
-    color: "#666666",
-  },
-  {
-    value: "lightly_active",
-    label: "Lightly Active",
-    description: "Light exercise 1-3 days/week",
-    icon: "walk",
-    color: "#2196F3",
-  },
-  {
-    value: "moderately_active",
-    label: "Moderately Active",
-    description: "Moderate exercise 3-5 days/week",
-    icon: "run",
-    color: "#FF9800",
-  },
-  {
-    value: "very_active",
-    label: "Very Active",
-    description: "Hard exercise 6-7 days/week",
-    icon: "dumbbell",
-    color: "#4CAF50",
-  },
-  {
-    value: "extremely_active",
-    label: "Extremely Active",
-    description: "Very hard exercise, physical job",
-    icon: "trophy",
-    color: "#9C27B0",
-  },
-];
-
 const FITNESS_GOALS = [
   // Weight Management
   {
@@ -178,37 +140,14 @@ const GOAL_CATEGORIES = FITNESS_GOALS.reduce((acc, goal) => {
   return acc;
 }, {} as Record<string, typeof FITNESS_GOALS>);
 
-// Utility: Calculate calorie goal (Mifflin-St Jeor + activity multiplier)
-function calculateCalorieGoal({
-  weight,
-  activityLevel,
-}: {
-  weight: number;
-  activityLevel: string;
-}) {
-  // For simplicity, use default values for gender, height, age
+// Utility: Calculate calorie goal (Mifflin-St Jeor + default activity multiplier)
+function calculateCalorieGoal({ weight }: { weight: number }) {
+  // For simplicity, use default values for gender, height, age, and moderate activity
   const gender = "male";
   const height = 175;
   const age = 30;
   let bmr = 10 * weight + 6.25 * height - 5 * age + 5;
-  let activityMultiplier = 1.2;
-  switch (activityLevel) {
-    case "sedentary":
-      activityMultiplier = 1.2;
-      break;
-    case "lightly_active":
-      activityMultiplier = 1.375;
-      break;
-    case "moderately_active":
-      activityMultiplier = 1.55;
-      break;
-    case "very_active":
-      activityMultiplier = 1.725;
-      break;
-    case "extremely_active":
-      activityMultiplier = 1.9;
-      break;
-  }
+  let activityMultiplier = 1.55; // Moderate activity as default
   return Math.round(bmr * activityMultiplier);
 }
 
@@ -219,30 +158,27 @@ export function EditGoalsScreen() {
 
   // State for user's goals
   const [weight, setWeight] = useState(user?.weight?.toString() || "");
-  const [activityLevel, setActivityLevel] = useState(user?.activityLevel || "");
+  const [weightUnit] = useState("kg");
   const [selectedGoals, setSelectedGoals] = useState<string[]>(
     user?.fitnessGoals || []
   );
-  const [weightUnit, setWeightUnit] = useState<"kg" | "lb">("kg");
-  const [calorieGoal, setCalorieGoal] = useState(0);
+  const [targetCalories, setTargetCalories] = useState<number>(2000);
 
   // UI state
   const [loading, setLoading] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const successFade = useRef(new Animated.Value(0)).current;
 
-  // Recalculate calorie goal when dependencies change
+  // Calculate calorie goal when weight changes
   useEffect(() => {
     const weightNum =
       weightUnit === "kg" ? parseFloat(weight) : parseFloat(weight) * 0.453592;
-    if (weightNum > 0 && activityLevel) {
-      setCalorieGoal(
-        calculateCalorieGoal({ weight: weightNum, activityLevel })
-      );
+    if (weightNum > 0) {
+      setTargetCalories(calculateCalorieGoal({ weight: weightNum }));
     } else {
-      setCalorieGoal(0);
+      setTargetCalories(2000); // Default value
     }
-  }, [weight, weightUnit, activityLevel, selectedGoals]);
+  }, [weight, weightUnit]);
 
   // Handle goal toggle
   const handleGoalToggle = (goalId: string) => {
@@ -290,9 +226,8 @@ export function EditGoalsScreen() {
       setLoading(true);
       const goalsData = {
         weight: weightNum,
-        activityLevel: activityLevel || undefined,
         fitnessGoals: selectedGoals.length > 0 ? selectedGoals : undefined,
-        dailyCalorieGoal: calorieGoal > 0 ? calorieGoal : undefined,
+        dailyCalorieGoal: targetCalories > 0 ? targetCalories : undefined,
       };
       const response = await userService.updateProfile(goalsData);
       if (response.success) {
@@ -361,17 +296,9 @@ export function EditGoalsScreen() {
                     value={weight}
                     onChangeText={setWeight}
                     keyboardType="numeric"
-                    placeholder="Enter weight"
+                    placeholder="Enter weight (kg)"
                     placeholderTextColor="#999"
                   />
-                  <TouchableOpacity
-                    style={styles.unitToggle}
-                    onPress={() =>
-                      setWeightUnit(weightUnit === "kg" ? "lb" : "kg")
-                    }
-                  >
-                    <Text style={styles.unitText}>{weightUnit}</Text>
-                  </TouchableOpacity>
                 </View>
               </View>
             </View>
@@ -383,59 +310,16 @@ export function EditGoalsScreen() {
                 <Icon name="fire" size={32} color="#FF6B35" />
                 <View style={styles.calorieInfo}>
                   <Text style={styles.calorieValue}>
-                    {calorieGoal > 0 ? calorieGoal.toLocaleString() : "--"}
+                    {targetCalories > 0
+                      ? targetCalories.toLocaleString()
+                      : "--"}
                   </Text>
                   <Text style={styles.calorieUnit}>kcal/day</Text>
                 </View>
               </View>
               <Text style={styles.calorieNote}>
-                Automatically calculated based on your weight, activity level,
-                and goals
+                Automatically calculated based on your weight and goals
               </Text>
-            </View>
-
-            {/* Activity Level Section */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Activity Level</Text>
-              <View style={styles.activityContainer}>
-                {ACTIVITY_LEVELS.map((level) => (
-                  <TouchableOpacity
-                    key={level.value}
-                    style={[
-                      styles.activityCard,
-                      activityLevel === level.value &&
-                        styles.activityCardSelected,
-                    ]}
-                    onPress={() => setActivityLevel(level.value)}
-                  >
-                    <Icon
-                      name={level.icon}
-                      size={24}
-                      color={
-                        activityLevel === level.value ? "#FFFFFF" : level.color
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.activityLabel,
-                        activityLevel === level.value &&
-                          styles.activityLabelSelected,
-                      ]}
-                    >
-                      {level.label}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.activityDescription,
-                        activityLevel === level.value &&
-                          styles.activityDescriptionSelected,
-                      ]}
-                    >
-                      {level.description}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
             </View>
 
             {/* Fitness Goals Section */}
@@ -606,17 +490,6 @@ const styles = StyleSheet.create({
     color: "#333",
     paddingVertical: 8,
   },
-  unitToggle: {
-    backgroundColor: "#000000",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  unitText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
   calorieCard: {
     backgroundColor: "#F8F8F8",
     borderRadius: 12,
@@ -645,39 +518,6 @@ const styles = StyleSheet.create({
     color: "#888",
     marginTop: 8,
     fontStyle: "italic",
-  },
-  activityContainer: {
-    gap: 12,
-  },
-  activityCard: {
-    backgroundColor: "#F8F8F8",
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: "#EEEEEE",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  activityCardSelected: {
-    borderColor: "#000000",
-    backgroundColor: "#000000",
-  },
-  activityLabel: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#333",
-    flex: 1,
-  },
-  activityLabelSelected: {
-    color: "#FFFFFF",
-  },
-  activityDescription: {
-    fontSize: 13,
-    color: "#666",
-  },
-  activityDescriptionSelected: {
-    color: "#FFFFFF",
   },
   goalCategory: {
     marginBottom: 24,

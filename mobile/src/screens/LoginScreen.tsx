@@ -305,6 +305,10 @@ export function LoginScreen() {
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry
+                  autoComplete="off"
+                  textContentType="none"
+                  autoCorrect={false}
+                  autoCapitalize="none"
                 />
               </View>
 
@@ -318,6 +322,10 @@ export function LoginScreen() {
                     value={confirmPassword}
                     onChangeText={setConfirmPassword}
                     secureTextEntry
+                    autoComplete="off"
+                    textContentType="none"
+                    autoCorrect={false}
+                    autoCapitalize="none"
                   />
                 </View>
               )}

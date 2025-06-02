@@ -7,12 +7,19 @@ import session from "express-session";
 import { logger } from "./utils/logger";
 import routes from "./routes";
 import "./config/passport";
+import { S3CleanupService } from "./services/s3CleanupService";
+import { apiLimiter } from "./middleware/rateLimiter";
+import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 
 const app = express();
 
 // Middleware
 app.use(helmet());
 app.use(compression());
+
+// Rate limiting - apply to all requests
+app.use("/api", apiLimiter);
+
 app.use(
   cors({
     origin: process.env.ALLOWED_ORIGINS?.split(",") || [
@@ -44,18 +51,28 @@ app.use(
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Initialize S3 cleanup scheduler
+if (process.env.NODE_ENV === "production") {
+  S3CleanupService.scheduleCleanup();
+  logger.info("S3 cleanup scheduler initialized for production");
+}
+
 // API routes
 app.use("/api", routes);
 
 // Health check
 app.get("/health", (req: Request, res: Response) => {
-  res.status(200).json({ status: "ok" });
+  res.status(200).json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || "development",
+  });
 });
 
-// Handle 404
-app.use((req: Request, res: Response) => {
-  logger.warn(`Route not found: ${req.method} ${req.url}`);
-  res.status(404).json({ error: "Not found" });
-});
+// 404 handler for unmatched routes
+app.use(notFoundHandler);
+
+// Global error handler (must be last)
+app.use(errorHandler);
 
 export default app;

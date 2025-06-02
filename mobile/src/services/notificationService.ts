@@ -19,6 +19,11 @@ interface RepeatingNotificationOptions {
 let Notifications: any = null;
 let isNotificationModuleAvailable = false;
 
+// Check if we're running in iOS simulator
+const isIOSSimulator = () => {
+  return Platform.OS === "ios" && __DEV__;
+};
+
 // Initialize notification module
 const initializeNotificationModule = () => {
   try {
@@ -40,15 +45,22 @@ const initializeNotificationModule = () => {
             shouldShowAlert: true,
             shouldPlaySound: true,
             shouldSetBadge: false,
-            shouldShowBanner: true,
-            shouldShowList: true,
           }),
         });
+      }
+
+      // Log simulator status
+      if (isIOSSimulator()) {
+        console.log(
+          "🔔 SIMULATOR MODE: Notifications have limitations in iOS simulator"
+        );
+        console.log("🔔 For full testing, please use a physical device");
       }
     } else {
       isNotificationModuleAvailable = false;
     }
   } catch (error) {
+    console.error("Failed to initialize notification module:", error);
     isNotificationModuleAvailable = false;
     Notifications = null;
   }
@@ -193,148 +205,124 @@ export class NotificationService {
     }
   }
 
-  // Schedule smart daily meal reminder notifications
-  async scheduleSmartDailyReminders(): Promise<void> {
-    try {
-      if (!this.isAvailable || !Notifications) {
-        return;
-      }
-
-      // Cancel existing notifications first
-      await this.cancelAllNotifications();
-
-      // Get smart notification content
-      const content = await this.generateSmartNotificationContent();
-
-      // Check if SchedulableTriggerInputTypes is available
-      const triggerType =
-        Notifications.SchedulableTriggerInputTypes?.CALENDAR || "calendar";
-
-      // Morning reminder (8 AM) - Always encouraging
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: content.morningTitle,
-          body: content.morningBody,
-          data: { type: "morning_reminder" },
-        },
-        trigger: {
-          type: triggerType,
-          hour: 8,
-          minute: 0,
-          repeats: true,
-        },
-      });
-
-      // Afternoon check-in (2 PM) - Gentle reminder
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "Afternoon check-in! 🌞",
-          body: "How's your nutrition going today?",
-          data: { type: "afternoon_reminder" },
-        },
-        trigger: {
-          type: triggerType,
-          hour: 14,
-          minute: 0,
-          repeats: true,
-        },
-      });
-
-      // Evening reminder (8 PM) - Smart based on activity
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: content.eveningTitle,
-          body: content.eveningBody,
-          data: { type: "evening_reminder" },
-        },
-        trigger: {
-          type: triggerType,
-          hour: 20,
-          minute: 0,
-          repeats: true,
-        },
-      });
-    } catch (error) {}
-  }
-
-  // Schedule a repeating notification with custom options
+  // Simple notification scheduling - just works!
   async scheduleRepeatingNotification(
     options: RepeatingNotificationOptions
   ): Promise<void> {
     try {
       if (!this.isAvailable || !Notifications) {
+        console.log("Notification service not available");
         return;
       }
 
-      const {
-        id,
-        title,
-        body,
-        hour,
-        minute,
-        weekdaysOnly = false,
-        weekly = false,
-      } = options;
+      const { id, title, body, hour, minute } = options;
 
-      // Check if SchedulableTriggerInputTypes is available
-      const triggerType =
-        Notifications.SchedulableTriggerInputTypes?.CALENDAR || "calendar";
+      // Simple: Calculate when to fire
+      const now = new Date();
+      const fireTime = new Date();
+      fireTime.setHours(hour, minute, 0, 0);
 
-      if (weekly) {
-        // Schedule weekly notification (every Monday by default)
-        await Notifications.scheduleNotificationAsync({
-          identifier: id,
-          content: {
-            title,
-            body,
-            data: { type: "custom_reminder", id },
-          },
-          trigger: {
-            type: triggerType,
-            weekday: 2, // Monday (1 = Sunday, 2 = Monday, etc.)
-            hour,
-            minute,
-            repeats: true,
-          },
-        });
-      } else if (weekdaysOnly) {
-        // Schedule for weekdays only (Monday to Friday)
-        for (let weekday = 2; weekday <= 6; weekday++) {
-          await Notifications.scheduleNotificationAsync({
-            identifier: `${id}-${weekday}`,
-            content: {
-              title,
-              body,
-              data: { type: "custom_reminder", id },
-            },
-            trigger: {
-              type: triggerType,
-              weekday,
-              hour,
-              minute,
-              repeats: true,
-            },
-          });
-        }
-      } else {
-        // Schedule daily notification
-        await Notifications.scheduleNotificationAsync({
-          identifier: id,
-          content: {
-            title,
-            body,
-            data: { type: "custom_reminder", id },
-          },
-          trigger: {
-            type: triggerType,
-            hour,
-            minute,
-            repeats: true,
-          },
-        });
+      // If time passed today, schedule for tomorrow
+      if (fireTime <= now) {
+        fireTime.setDate(fireTime.getDate() + 1);
       }
+
+      const secondsUntilFire = Math.floor(
+        (fireTime.getTime() - now.getTime()) / 1000
+      );
+
+      console.log(`📅 Scheduling: ${title}`);
+      console.log(`📅 Will fire at: ${fireTime.toLocaleString()}`);
+      console.log(
+        `📅 In ${secondsUntilFire} seconds (${Math.round(
+          secondsUntilFire / 60
+        )} minutes)`
+      );
+
+      // Simple schedule
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title,
+          body,
+          sound: true,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: secondsUntilFire,
+        },
+      });
+
+      console.log(`✅ Scheduled successfully!`);
     } catch (error) {
-      // Silently handle errors
+      console.error("Error scheduling:", error);
+    }
+  }
+
+  // Schedule smart daily meal reminder notifications
+  async scheduleSmartDailyReminders(): Promise<void> {
+    try {
+      if (!this.isAvailable || !Notifications) return;
+
+      const content = await this.generateSmartNotificationContent();
+
+      // Helper to schedule a notification for demo
+      const scheduleForDemo = async (
+        hour: number,
+        minute: number,
+        title: string,
+        body: string,
+        type: string
+      ) => {
+        const now = new Date();
+        const targetTime = new Date();
+        targetTime.setHours(hour, minute, 0, 0);
+
+        if (targetTime <= now) {
+          targetTime.setDate(targetTime.getDate() + 1);
+        }
+
+        const secondsFromNow = Math.floor(
+          (targetTime.getTime() - now.getTime()) / 1000
+        );
+
+        await Notifications.scheduleNotificationAsync({
+          content: { title, body, data: { type }, sound: true },
+          trigger: { seconds: secondsFromNow },
+        });
+
+        console.log(
+          `✅ ${type} scheduled for demo in ${Math.floor(
+            secondsFromNow / 60
+          )} minutes`
+        );
+      };
+
+      // Schedule each notification
+      await scheduleForDemo(
+        8,
+        0,
+        content.morningTitle,
+        content.morningBody,
+        "morning_reminder"
+      );
+      await scheduleForDemo(
+        14,
+        0,
+        "Afternoon check-in! 🌞",
+        "How's your nutrition going today?",
+        "afternoon_reminder"
+      );
+      await scheduleForDemo(
+        20,
+        0,
+        content.eveningTitle,
+        content.eveningBody,
+        "evening_reminder"
+      );
+
+      console.log("✅ All demo notifications scheduled");
+    } catch (error) {
+      console.error("Error scheduling reminders:", error);
     }
   }
 
@@ -342,46 +330,6 @@ export class NotificationService {
   async scheduleDailyReminders(): Promise<void> {
     // Use the new smart scheduling
     await this.scheduleSmartDailyReminders();
-  }
-
-  // Send immediate notification (for testing)
-  async sendImmediateNotification(title: string, body: string): Promise<void> {
-    try {
-      if (!this.isAvailable || !Notifications) {
-        return;
-      }
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title,
-          body,
-          data: { type: "immediate_test" },
-        },
-        trigger: null, // Send immediately
-      });
-    } catch (error) {}
-  }
-
-  // Test smart notifications (for development)
-  async testSmartNotifications(): Promise<void> {
-    try {
-      const content = await this.generateSmartNotificationContent();
-
-      // Send test notifications with 5-second delays
-      setTimeout(() => {
-        this.sendImmediateNotification(
-          content.morningTitle,
-          content.morningBody
-        );
-      }, 2000);
-
-      setTimeout(() => {
-        this.sendImmediateNotification(
-          content.eveningTitle,
-          content.eveningBody
-        );
-      }, 5000);
-    } catch (error) {}
   }
 
   // Cancel all scheduled notifications
@@ -396,41 +344,9 @@ export class NotificationService {
       }
 
       await Notifications.cancelAllScheduledNotificationsAsync();
-    } catch (error) {}
-  }
-
-  // Check if notifications are enabled
-  async areNotificationsEnabled(): Promise<boolean> {
-    try {
-      if (
-        !this.isAvailable ||
-        !Notifications ||
-        !Notifications.getPermissionsAsync
-      ) {
-        return false;
-      }
-
-      const { status } = await Notifications.getPermissionsAsync();
-      return status === "granted";
+      console.log("🗑️ All notifications canceled");
     } catch (error) {
-      return false;
-    }
-  }
-
-  // Get all scheduled notifications (for debugging)
-  async getScheduledNotifications(): Promise<any[]> {
-    try {
-      if (
-        !this.isAvailable ||
-        !Notifications ||
-        !Notifications.getAllScheduledNotificationsAsync
-      ) {
-        return [];
-      }
-
-      return await Notifications.getAllScheduledNotificationsAsync();
-    } catch (error) {
-      return [];
+      console.error("Error canceling notifications:", error);
     }
   }
 }

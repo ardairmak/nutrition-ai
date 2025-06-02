@@ -19,7 +19,10 @@
       "config": {
         "usesNonExemptEncryption": false
       },
-      "associatedDomains": ["applinks:foodrecognition.app"]
+      "associatedDomains": ["applinks:foodrecognition.app"],
+      "infoPlist": {
+        "UIBackgroundModes": ["background-processing", "remote-notification"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -39,6 +42,14 @@
           ],
           "category": ["BROWSABLE", "DEFAULT"]
         }
+      ],
+      "permissions": [
+        "WAKE_LOCK",
+        "RECEIVE_BOOT_COMPLETED",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_EXACT_ALARM",
+        "com.android.alarm.permission.SET_ALARM",
+        "POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -54,6 +65,23 @@
         "projectId": "your-project-id"
       },
       "enableNetworkDebug": true
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#4285F4",
+          "defaultChannel": "default",
+          "sounds": []
+        }
+      ]
+    ],
+    "notification": {
+      "icon": "./assets/notification-icon.png",
+      "color": "#4285F4",
+      "androidMode": "default",
+      "androidCollapsedTitle": "Food Recognition"
     }
   }
 }

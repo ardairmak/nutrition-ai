@@ -14,9 +14,9 @@ import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { MainTabsParamList } from "./types";
 import { RootStackParamList } from "./types";
-import { DashboardScreen } from "../screens/PlaceholderScreens";
+import { DashboardScreen } from "../screens/DashboardScreen";
 import { JournalScreen } from "../screens/JournalScreen";
-import { ProgressScreen } from "../screens/ProgressScreen";
+import { EnhancedProgressScreen } from "../screens/EnhancedProgressScreen";
 import { ProfileScreen } from "../screens/ProfileScreen";
 
 const Tab = createBottomTabNavigator<MainTabsParamList>();
@@ -30,9 +30,8 @@ const CustomAddButton = ({
   onPress: () => void;
 }) => {
   const [modalVisible, setModalVisible] = useState(false);
-  const [mealTypeModalVisible, setMealTypeModalVisible] = useState(false);
+  const [showMealTypeSelection, setShowMealTypeSelection] = useState(false);
   const slideAnim = useRef(new Animated.Value(300)).current;
-  const mealTypeSlideAnim = useRef(new Animated.Value(300)).current;
   const stackNavigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const tabNavigation =
@@ -63,24 +62,6 @@ const CustomAddButton = ({
     }
   }, [modalVisible, slideAnim]);
 
-  useEffect(() => {
-    if (mealTypeModalVisible) {
-      // Slide up animation
-      Animated.timing(mealTypeSlideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      // Slide down animation
-      Animated.timing(mealTypeSlideAnim, {
-        toValue: 300,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [mealTypeModalVisible, mealTypeSlideAnim]);
-
   const closeModal = () => {
     // Start slide down animation
     Animated.timing(slideAnim, {
@@ -90,37 +71,29 @@ const CustomAddButton = ({
     }).start(() => {
       // Close modal after animation completes
       setModalVisible(false);
-    });
-  };
-
-  const closeMealTypeModal = () => {
-    // Start slide down animation
-    Animated.timing(mealTypeSlideAnim, {
-      toValue: 300,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => {
-      // Close modal after animation completes
-      setMealTypeModalVisible(false);
+      setShowMealTypeSelection(false);
     });
   };
 
   const handleCameraPress = () => {
-    closeModal();
-    // Show meal type selection modal
-    setMealTypeModalVisible(true);
+    // Show meal type selection in the same modal
+    setShowMealTypeSelection(true);
   };
 
   const handleMealTypeSelect = (mealType: string) => {
-    closeMealTypeModal();
+    closeModal();
     // Navigate to the camera screen with selected meal type
     stackNavigation.navigate("Camera", { mealType });
   };
 
   const handleLogWeightPress = () => {
     closeModal();
-    // Navigate to Progress screen
-    tabNavigation.navigate("Progress");
+    // Navigate to Progress screen with weight modal open
+    tabNavigation.navigate("Progress", { openWeightModal: true });
+  };
+
+  const handleBackToMainOptions = () => {
+    setShowMealTypeSelection(false);
   };
 
   return (
@@ -153,72 +126,52 @@ const CustomAddButton = ({
             ]}
           >
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Add New Entry</Text>
 
-            <View style={styles.optionsContainer}>
-              <TouchableOpacity
-                style={styles.optionButton}
-                onPress={handleCameraPress}
-              >
-                <Icon name="camera" size={24} color="#4285F4" />
-                <Text style={styles.optionText}>Food</Text>
-              </TouchableOpacity>
+            {!showMealTypeSelection ? (
+              <>
+                <Text style={styles.modalTitle}>Add New Entry</Text>
+                <View style={styles.optionsContainer}>
+                  <TouchableOpacity
+                    style={styles.optionButton}
+                    onPress={handleCameraPress}
+                  >
+                    <Icon name="camera" size={24} color="#000000" />
+                    <Text style={styles.optionText}>Food</Text>
+                  </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.optionButton}
-                onPress={handleLogWeightPress}
-              >
-                <Icon name="scale-bathroom" size={24} color="#4285F4" />
-                <Text style={styles.optionText}>Log Weight</Text>
-              </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.optionButton}
+                    onPress={handleLogWeightPress}
+                  >
+                    <Icon name="scale-bathroom" size={24} color="#000000" />
+                    <Text style={styles.optionText}>Log Weight</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.modalHeader}>
+                  <TouchableOpacity onPress={handleBackToMainOptions}>
+                    <Icon name="arrow-left" size={24} color="#333" />
+                  </TouchableOpacity>
+                  <Text style={styles.modalTitle}>Select Meal Type</Text>
+                  <View style={{ width: 24 }} />
+                </View>
 
-              <TouchableOpacity style={styles.optionButton}>
-                <Icon name="water" size={24} color="#4285F4" />
-                <Text style={styles.optionText}>Water</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.optionButton}>
-                <Icon name="dumbbell" size={24} color="#4285F4" />
-                <Text style={styles.optionText}>Exercise</Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Meal Type Selection Modal */}
-      <Modal
-        animationType="fade"
-        transparent={true}
-        visible={mealTypeModalVisible}
-        onRequestClose={closeMealTypeModal}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={closeMealTypeModal}
-        >
-          <Animated.View
-            style={[
-              styles.modalContent,
-              { transform: [{ translateY: mealTypeSlideAnim }] },
-            ]}
-          >
-            <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Select Meal Type</Text>
-
-            <View style={styles.mealTypeContainer}>
-              {mealTypes.map((mealType) => (
-                <TouchableOpacity
-                  key={mealType.id}
-                  style={styles.mealTypeButton}
-                  onPress={() => handleMealTypeSelect(mealType.id)}
-                >
-                  <Icon name={mealType.icon} size={24} color="#4285F4" />
-                  <Text style={styles.mealTypeText}>{mealType.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+                <View style={styles.mealTypeContainer}>
+                  {mealTypes.map((mealType) => (
+                    <TouchableOpacity
+                      key={mealType.id}
+                      style={styles.mealTypeButton}
+                      onPress={() => handleMealTypeSelect(mealType.id)}
+                    >
+                      <Icon name={mealType.icon} size={24} color="#000000" />
+                      <Text style={styles.mealTypeText}>{mealType.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
           </Animated.View>
         </TouchableOpacity>
       </Modal>
@@ -286,7 +239,7 @@ export function MainTabNavigator() {
 
       <Tab.Screen
         name="Progress"
-        component={ProgressScreen}
+        component={EnhancedProgressScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
             <Icon name="chart-line" color={color} size={size} />
@@ -390,5 +343,11 @@ const styles = StyleSheet.create({
   mealTypeText: {
     marginTop: 8,
     color: "#333",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 15,
   },
 });

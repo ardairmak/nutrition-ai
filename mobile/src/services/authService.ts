@@ -24,34 +24,7 @@ const authService = {
    */
   signIn: async (email: string, password: string): Promise<ApiResponse> => {
     try {
-      // Admin bypass for testing (admin/admin)
-      if (email === "admin" && password === "admin") {
-        console.log("USING ADMIN BYPASS FOR TESTING");
-        // Create a fake token - this is just for testing
-        const fakeToken = "admin_test_token_" + Date.now();
-
-        // Save the token
-        await AsyncStorage.setItem(AUTH_TOKEN_KEY, fakeToken);
-        await AsyncStorage.setItem(getAuthTokenKey(email), fakeToken);
-
-        // Return a success response with the fake token
-        return {
-          success: true,
-          token: fakeToken,
-          user: {
-            id: "admin123",
-            email: "admin@test.com",
-            firstName: "Admin",
-            lastName: "User",
-            profileSetupComplete: true,
-            fitnessGoals: ["weight_loss", "muscle_gain"],
-            createdAt: new Date().toISOString(),
-          },
-        };
-      }
-
       // Regular authentication flow
-      // Use apiCall helper
       const response: LoginResponse = await apiCall(
         "/auth/login",
         "POST",
@@ -61,18 +34,15 @@ const authService = {
 
       // Check if the response was successful and contains a token
       if (response.success && response.token) {
-        // Now TypeScript knows response might have a token if success is true
         const token = response.token;
         await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
         if (email) {
           await AsyncStorage.setItem(getAuthTokenKey(email), token);
-          console.log(`Token saved to user-specific key for ${email}`);
         }
       }
 
       return response;
     } catch (error) {
-      console.error("Sign in error:", error);
       return {
         success: false,
         error: "Network error or unexpected issue during sign in.",

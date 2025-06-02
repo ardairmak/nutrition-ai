@@ -12,6 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../contexts/AuthContext";
 import CircularProgress from "../components/CircularProgress";
+import { S3Image } from "../components/S3Image";
 
 const { width } = Dimensions.get("window");
 
@@ -175,10 +176,6 @@ export const HomeScreen = () => {
               </Text>
               <Text style={styles.calorieItemLabel}>Food</Text>
             </View>
-            <View style={styles.calorieItem}>
-              <Text style={styles.calorieItemValue}>0</Text>
-              <Text style={styles.calorieItemLabel}>Exercise</Text>
-            </View>
           </View>
         </View>
 
@@ -266,10 +263,7 @@ export const HomeScreen = () => {
         <View style={styles.recentlyLoggedSection}>
           <Text style={styles.sectionTitle}>Recently Logged</Text>
           <View style={styles.foodCard}>
-            <Image
-              source={{ uri: recentFood.imageUri }}
-              style={styles.foodImage}
-            />
+            <S3Image imageUrl={recentFood.imageUri} style={styles.foodImage} />
             <View style={styles.foodInfo}>
               <Text style={styles.foodName}>{recentFood.name}</Text>
               <Text style={styles.foodCalories}>

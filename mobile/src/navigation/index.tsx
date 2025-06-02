@@ -20,6 +20,7 @@ import { NotificationSettingsScreen } from "../screens/NotificationSettingsScree
 import { USER_DATA_KEY } from "../constants";
 import { RootStackParamList } from "./types";
 import FriendProfileScreen from "../screens/FriendProfileScreen";
+import { AIChatScreen } from "../screens/AIChatScreen";
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -69,7 +70,7 @@ export default function Navigation() {
                   headerStyle: {
                     backgroundColor: "#fff",
                   },
-                  headerTintColor: "#4285F4",
+                  headerTintColor: "#000000",
                   headerShadowVisible: false,
                 }}
               />
@@ -83,7 +84,7 @@ export default function Navigation() {
                   headerStyle: {
                     backgroundColor: "#fff",
                   },
-                  headerTintColor: "#4285F4",
+                  headerTintColor: "#000000",
                   headerShadowVisible: false,
                 }}
               />
@@ -120,6 +121,20 @@ export default function Navigation() {
                 component={NotificationSettingsScreen}
                 options={{
                   headerShown: false,
+                }}
+              />
+              <Stack.Screen
+                name="AIChat"
+                component={AIChatScreen}
+                options={{
+                  headerShown: true,
+                  title: "AI Nutrition Assistant",
+                  headerBackTitle: "Profile",
+                  headerStyle: {
+                    backgroundColor: "#fff",
+                  },
+                  headerTintColor: "#000000",
+                  headerShadowVisible: false,
                 }}
               />
               <Stack.Screen

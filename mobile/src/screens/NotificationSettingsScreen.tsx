@@ -9,11 +9,15 @@ import {
   Switch,
   Alert,
   Platform,
+  Modal,
+  Animated,
 } from "react-native";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import { useNavigation } from "@react-navigation/native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import notificationService from "../services/notificationService";
+import userService from "../services/userService";
+import * as Notifications from "expo-notifications";
 
 interface NotificationTime {
   id: string;
@@ -60,6 +64,8 @@ export function NotificationSettingsScreen() {
     type: string;
     index?: number;
   }>({ visible: false, type: "" });
+  const [tempTime, setTempTime] = useState(new Date());
+  const slideAnim = useState(new Animated.Value(300))[0]; // Start below screen
 
   const [settings, setSettings] = useState<NotificationSettings>({
     mealReminders: {
@@ -100,39 +106,76 @@ export function NotificationSettingsScreen() {
   }, []);
 
   const loadSettings = async () => {
-    // Load saved settings from storage or API
-    // For now, using default settings
+    try {
+      setLoading(true);
+      const response = await userService.getNotificationSettings();
+
+      if (response.success && response.settings) {
+        setSettings(response.settings);
+        console.log("Loaded notification settings:", response.settings);
+      } else {
+        console.warn("Failed to load notification settings, using defaults");
+        // Keep default settings if loading fails
+      }
+    } catch (error) {
+      console.error("Error loading notification settings:", error);
+      // Keep default settings if loading fails
+    } finally {
+      setLoading(false);
+    }
   };
 
   const saveSettings = async () => {
     setLoading(true);
     try {
-      // Cancel all existing notifications
+      // First save settings to the backend
+      const response = await userService.updateNotificationSettings(settings);
+
+      if (!response.success) {
+        Alert.alert("Error", "Failed to save notification settings to server");
+        return;
+      }
+
+      // IMPORTANT: Cancel all existing notifications before rescheduling
+      // This prevents duplicate notifications
+      console.log("🗑️ Canceling all existing notifications...");
       await notificationService.cancelAllNotifications();
+
+      // Wait a bit to ensure cancellation completes
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      console.log("🔔 Starting to schedule NEW notifications...");
 
       // Schedule new notifications based on settings
       if (settings.mealReminders.enabled) {
+        console.log("🍽️ Scheduling meal reminders...");
         await scheduleMealReminders();
       }
 
       if (settings.waterReminders.enabled) {
+        console.log("💧 Scheduling water reminders...");
         await scheduleWaterReminders();
       }
 
       if (settings.weighInReminders.enabled) {
+        console.log("⚖️ Scheduling weigh-in reminders...");
         await scheduleWeighInReminders();
       }
 
       if (settings.streakReminders.enabled) {
+        console.log("🔥 Scheduling streak reminders...");
         await scheduleStreakReminders();
       }
 
       if (settings.motivationalMessages.enabled) {
+        console.log("💪 Scheduling motivational messages...");
         await scheduleMotivationalMessages();
       }
 
+      console.log("✅ All notifications scheduled successfully!");
       Alert.alert("Success", "Notification settings saved successfully!");
     } catch (error) {
+      console.error("Error saving notification settings:", error);
       Alert.alert("Error", "Failed to save notification settings");
     } finally {
       setLoading(false);
@@ -140,18 +183,39 @@ export function NotificationSettingsScreen() {
   };
 
   const scheduleMealReminders = async () => {
+    console.log("🍽️ Starting to schedule meal reminders...");
+    console.log("🍽️ Meal reminder settings:", settings.mealReminders);
+
     for (const time of settings.mealReminders.times) {
       if (time.enabled) {
-        await notificationService.scheduleRepeatingNotification({
-          id: `meal-${time.id}`,
-          title: "Meal Reminder 🍽️",
-          body: "Time to log your meal and stay on track!",
-          hour: time.hour,
-          minute: time.minute,
-          weekdaysOnly: settings.mealReminders.weekdaysOnly,
-        });
+        console.log(
+          `🍽️ Scheduling meal reminder for ${time.hour}:${time.minute} with ID: meal-${time.id}`
+        );
+
+        try {
+          await notificationService.scheduleRepeatingNotification({
+            id: `meal-${time.id}`,
+            title: "Meal Reminder 🍽️",
+            body: "Time to log your meal and stay on track!",
+            hour: time.hour,
+            minute: time.minute,
+            weekdaysOnly: settings.mealReminders.weekdaysOnly,
+          });
+          console.log(
+            `✅ Successfully scheduled meal reminder: meal-${time.id}`
+          );
+        } catch (error) {
+          console.error(
+            `❌ Failed to schedule meal reminder: meal-${time.id}`,
+            error
+          );
+        }
+
+        // Small delay between scheduling individual meal reminders
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
     }
+    console.log("🍽️ Finished scheduling all meal reminders");
   };
 
   const scheduleWaterReminders = async () => {
@@ -191,11 +255,18 @@ export function NotificationSettingsScreen() {
   const scheduleStreakReminders = async () => {
     const { time } = settings.streakReminders;
 
-    await notificationService.scheduleSmartDailyReminders();
+    await notificationService.scheduleRepeatingNotification({
+      id: "streak-reminder",
+      title: "Don't Break Your Streak! 🔥",
+      body: "Keep your nutrition logging streak alive!",
+      hour: time.hour,
+      minute: time.minute,
+      weekdaysOnly: false,
+    });
   };
 
   const scheduleMotivationalMessages = async () => {
-    // Schedule motivational messages
+    // Use a sensible default time (9:00 AM) but calculate it properly
     await notificationService.scheduleRepeatingNotification({
       id: "motivation",
       title: "You've Got This! 💪",
@@ -206,21 +277,129 @@ export function NotificationSettingsScreen() {
     });
   };
 
-  const testNotificationNow = async () => {
-    try {
-      // Send an immediate test notification
-      await notificationService.sendImmediateNotification(
-        "🎯 Demo Test Notification",
-        "This is a test notification for your demo! Notifications are working perfectly."
-      );
+  const handleTimeChange = (event: any, selectedDate?: Date) => {
+    if (Platform.OS === "android") {
+      // On Android, handle immediate selection
+      setShowTimePicker({ visible: false, type: "" });
 
-      // Show a brief success message
-      alert("Test notification sent! Check your device notifications.");
-    } catch (error) {
-      alert(
-        "Failed to send test notification. Make sure notifications are enabled."
+      if (event.type === "set" && selectedDate) {
+        applyTimeChange(selectedDate);
+      }
+    } else if (selectedDate) {
+      // On iOS, just update temp time - user will confirm later
+      setTempTime(selectedDate);
+    }
+  };
+
+  const applyTimeChange = (selectedDate: Date) => {
+    const hour = selectedDate.getHours();
+    const minute = selectedDate.getMinutes();
+
+    if (
+      showTimePicker.type.startsWith("meal-") &&
+      showTimePicker.index !== undefined
+    ) {
+      const timeId = settings.mealReminders.times[showTimePicker.index].id;
+      updateMealTime(timeId, hour, minute);
+    } else if (showTimePicker.type === "water-start") {
+      setSettings((prev) => ({
+        ...prev,
+        waterReminders: {
+          ...prev.waterReminders,
+          startTime: { hour, minute },
+        },
+      }));
+    } else if (showTimePicker.type === "water-end") {
+      setSettings((prev) => ({
+        ...prev,
+        waterReminders: {
+          ...prev.waterReminders,
+          endTime: { hour, minute },
+        },
+      }));
+    } else if (showTimePicker.type === "weigh-in") {
+      setSettings((prev) => ({
+        ...prev,
+        weighInReminders: {
+          ...prev.weighInReminders,
+          time: { hour, minute },
+        },
+      }));
+    } else if (showTimePicker.type === "streak") {
+      setSettings((prev) => ({
+        ...prev,
+        streakReminders: {
+          ...prev.streakReminders,
+          time: { hour, minute },
+        },
+      }));
+    }
+  };
+
+  const openTimePicker = (type: string, index?: number) => {
+    // Set initial time based on current setting
+    let initialTime = new Date();
+
+    if (type.startsWith("meal-") && index !== undefined) {
+      const mealTime = settings.mealReminders.times[index];
+      initialTime.setHours(mealTime.hour, mealTime.minute, 0, 0);
+    } else if (type === "water-start") {
+      initialTime.setHours(
+        settings.waterReminders.startTime.hour,
+        settings.waterReminders.startTime.minute,
+        0,
+        0
+      );
+    } else if (type === "water-end") {
+      initialTime.setHours(
+        settings.waterReminders.endTime.hour,
+        settings.waterReminders.endTime.minute,
+        0,
+        0
+      );
+    } else if (type === "weigh-in") {
+      initialTime.setHours(
+        settings.weighInReminders.time.hour,
+        settings.weighInReminders.time.minute,
+        0,
+        0
+      );
+    } else if (type === "streak") {
+      initialTime.setHours(
+        settings.streakReminders.time.hour,
+        settings.streakReminders.time.minute,
+        0,
+        0
       );
     }
+
+    setTempTime(initialTime);
+
+    // Reset animation position and show modal
+    slideAnim.setValue(300); // Start from bottom
+    setShowTimePicker({ visible: true, type, index });
+
+    // Animate modal in
+    Animated.spring(slideAnim, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 50,
+      friction: 8,
+    }).start();
+  };
+
+  const confirmTimeChange = () => {
+    applyTimeChange(tempTime);
+    setShowTimePicker({ visible: false, type: "" }); // Close immediately on confirm
+  };
+
+  const cancelTimeChange = () => {
+    setShowTimePicker({ visible: false, type: "" }); // Close immediately on cancel
+  };
+
+  const closeModal = () => {
+    // This function is no longer needed, but keeping for potential future use
+    setShowTimePicker({ visible: false, type: "" });
   };
 
   const addMealTime = () => {
@@ -280,55 +459,6 @@ export function NotificationSettingsScreen() {
     return `${displayHour}:${minute.toString().padStart(2, "0")} ${period}`;
   };
 
-  const handleTimeChange = (event: any, selectedDate?: Date) => {
-    setShowTimePicker({ visible: false, type: "" });
-
-    if (selectedDate && showTimePicker.type) {
-      const hour = selectedDate.getHours();
-      const minute = selectedDate.getMinutes();
-
-      if (
-        showTimePicker.type.startsWith("meal-") &&
-        showTimePicker.index !== undefined
-      ) {
-        const timeId = settings.mealReminders.times[showTimePicker.index].id;
-        updateMealTime(timeId, hour, minute);
-      } else if (showTimePicker.type === "water-start") {
-        setSettings((prev) => ({
-          ...prev,
-          waterReminders: {
-            ...prev.waterReminders,
-            startTime: { hour, minute },
-          },
-        }));
-      } else if (showTimePicker.type === "water-end") {
-        setSettings((prev) => ({
-          ...prev,
-          waterReminders: {
-            ...prev.waterReminders,
-            endTime: { hour, minute },
-          },
-        }));
-      } else if (showTimePicker.type === "weigh-in") {
-        setSettings((prev) => ({
-          ...prev,
-          weighInReminders: {
-            ...prev.weighInReminders,
-            time: { hour, minute },
-          },
-        }));
-      } else if (showTimePicker.type === "streak") {
-        setSettings((prev) => ({
-          ...prev,
-          streakReminders: {
-            ...prev.streakReminders,
-            time: { hour, minute },
-          },
-        }));
-      }
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -378,13 +508,7 @@ export function NotificationSettingsScreen() {
                   />
                   <TouchableOpacity
                     style={styles.timeButton}
-                    onPress={() =>
-                      setShowTimePicker({
-                        visible: true,
-                        type: `meal-${time.id}`,
-                        index,
-                      })
-                    }
+                    onPress={() => openTimePicker(`meal-${time.id}`, index)}
                   >
                     <Text style={styles.timeText}>
                       {formatTime(time.hour, time.minute)}
@@ -489,9 +613,7 @@ export function NotificationSettingsScreen() {
                   <Text style={styles.waterLabel}>From</Text>
                   <TouchableOpacity
                     style={styles.timeButton}
-                    onPress={() =>
-                      setShowTimePicker({ visible: true, type: "water-start" })
-                    }
+                    onPress={() => openTimePicker("water-start")}
                   >
                     <Text style={styles.timeText}>
                       {formatTime(
@@ -503,9 +625,7 @@ export function NotificationSettingsScreen() {
                   <Text style={styles.waterLabel}>to</Text>
                   <TouchableOpacity
                     style={styles.timeButton}
-                    onPress={() =>
-                      setShowTimePicker({ visible: true, type: "water-end" })
-                    }
+                    onPress={() => openTimePicker("water-end")}
                   >
                     <Text style={styles.timeText}>
                       {formatTime(
@@ -549,9 +669,7 @@ export function NotificationSettingsScreen() {
 
               <TouchableOpacity
                 style={styles.timeButton}
-                onPress={() =>
-                  setShowTimePicker({ visible: true, type: "weigh-in" })
-                }
+                onPress={() => openTimePicker("weigh-in")}
               >
                 <Text style={styles.timeText}>
                   {formatTime(
@@ -622,9 +740,7 @@ export function NotificationSettingsScreen() {
 
               <TouchableOpacity
                 style={styles.timeButton}
-                onPress={() =>
-                  setShowTimePicker({ visible: true, type: "streak" })
-                }
+                onPress={() => openTimePicker("streak")}
               >
                 <Text style={styles.timeText}>
                   {formatTime(
@@ -716,39 +832,57 @@ export function NotificationSettingsScreen() {
             </>
           )}
         </View>
-
-        {/* Demo Test Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleContainer}>
-              <Icon name="bell-ring" size={24} color="#000" />
-              <Text style={styles.sectionTitle}>Demo Test</Text>
-            </View>
-          </View>
-          <Text style={styles.sectionDescription}>
-            Test notifications immediately for demo purposes
-          </Text>
-          <TouchableOpacity
-            style={styles.testButton}
-            onPress={testNotificationNow}
-          >
-            <Icon name="send" size={20} color="#FFFFFF" />
-            <Text style={styles.testButtonText}>
-              Send Test Notification Now
-            </Text>
-          </TouchableOpacity>
-        </View>
       </ScrollView>
 
-      {showTimePicker.visible && (
-        <DateTimePicker
-          value={new Date()}
-          mode="time"
-          is24Hour={false}
-          display={Platform.OS === "ios" ? "spinner" : "default"}
-          onChange={handleTimeChange}
-        />
-      )}
+      {/* Improved Time Picker Modal */}
+      <Modal
+        visible={showTimePicker.visible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelTimeChange}
+      >
+        <View style={styles.modalOverlay}>
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              {
+                transform: [{ translateY: slideAnim }],
+              },
+            ]}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Time</Text>
+            </View>
+
+            <View style={styles.timePickerContainer}>
+              <DateTimePicker
+                value={tempTime}
+                mode="time"
+                is24Hour={false}
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                onChange={handleTimeChange}
+                style={styles.timePicker}
+              />
+            </View>
+
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={cancelTimeChange}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.confirmButton]}
+                onPress={confirmTimeChange}
+              >
+                <Text style={styles.confirmButtonText}>Confirm</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -935,19 +1069,62 @@ const styles = StyleSheet.create({
   frequencyTextActive: {
     color: "#FFFFFF",
   },
-  testButton: {
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContainer: {
+    backgroundColor: "#FFFFFF",
+    padding: 20,
+    borderRadius: 16,
+    width: "80%",
+    maxWidth: 400,
+  },
+  modalHeader: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#000000",
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 8,
+    justifyContent: "space-between",
+    marginBottom: 12,
   },
-  testButtonText: {
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#000000",
+  },
+  timePickerContainer: {
+    marginBottom: 16,
+  },
+  timePicker: {
+    width: "100%",
+    height: 200,
+  },
+  modalButtons: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  modalButton: {
+    padding: 12,
+    borderRadius: 8,
+    flex: 1,
+    marginHorizontal: 8,
+    alignItems: "center",
+  },
+  cancelButton: {
+    backgroundColor: "#CCCCCC",
+  },
+  confirmButton: {
+    backgroundColor: "#000000",
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#000000",
+  },
+  confirmButtonText: {
     fontSize: 16,
     fontWeight: "600",
     color: "#FFFFFF",
-    marginLeft: 8,
   },
 });

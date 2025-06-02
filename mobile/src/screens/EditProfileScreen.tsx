@@ -14,19 +14,29 @@ import {
   Animated,
   Easing,
   TouchableWithoutFeedback,
+  ActivityIndicator,
 } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
 import Icon from "react-native-vector-icons/MaterialCommunityIcons";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { Picker } from "@react-native-picker/picker";
 import userService from "../services/userService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { USER_DATA_KEY } from "../constants";
+import { ImagePickerComponent } from "../components/ImagePicker";
+import { UploadResponse, uploadService } from "../services/uploadService";
+import { S3Image } from "../components/S3Image";
+
+// Helper function to get user-specific data key
+const getUserDataKey = (email: string) => `@user_data_${email.toLowerCase()}`;
 
 export function EditProfileScreen() {
   const { user, setUser } = useAuth();
   const [modalVisible, setModalVisible] = useState<string | null>(null);
   const [inputValue, setInputValue] = useState("");
   const [dateValue, setDateValue] = useState<Date | null>(null);
+  const [weightValue, setWeightValue] = useState<string>(
+    String(Math.round(user?.weight || 80))
+  ); // Convert to string for picker
   const [loading, setLoading] = useState(false);
   const slideAnim = useRef(new Animated.Value(0)).current;
   const [showSuccess, setShowSuccess] = useState(false);
@@ -46,7 +56,7 @@ export function EditProfileScreen() {
     if (field === "height")
       setInputValue(user?.height ? String(user.height) : "");
     if (field === "weight")
-      setInputValue(user?.weight ? String(user.weight) : "");
+      setWeightValue(String(Math.round(user?.weight || 80))); // Convert to string
     if (field === "gender") setInputValue(user?.gender || "");
     if (field === "dateOfBirth")
       setDateValue(user?.dateOfBirth ? new Date(user.dateOfBirth) : new Date());
@@ -56,6 +66,7 @@ export function EditProfileScreen() {
     setModalVisible(null);
     setInputValue("");
     setDateValue(null);
+    setWeightValue(String(Math.round(user?.weight || 80))); // Convert to string
     slideAnim.setValue(0);
   };
 
@@ -100,7 +111,7 @@ export function EditProfileScreen() {
     let profileData: any = {};
     if (modalVisible === "username") profileData.firstName = inputValue.trim();
     if (modalVisible === "height") profileData.height = parseFloat(inputValue);
-    if (modalVisible === "weight") profileData.weight = parseFloat(inputValue);
+    if (modalVisible === "weight") profileData.weight = parseFloat(weightValue); // Convert back to number
     if (modalVisible === "gender") profileData.gender = inputValue;
     if (modalVisible === "dateOfBirth" && dateValue)
       profileData.dateOfBirth = dateValue.toISOString();
@@ -116,7 +127,7 @@ export function EditProfileScreen() {
           };
           setUser(updatedUser);
           await AsyncStorage.setItem(
-            USER_DATA_KEY,
+            getUserDataKey(user.email),
             JSON.stringify(updatedUser)
           );
         }
@@ -150,11 +161,6 @@ export function EditProfileScreen() {
         </Animated.View>
       )}
 
-      {/* Section Header */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionHeaderText}>Personal Details</Text>
-      </View>
-
       {/* Username */}
       <TouchableOpacity
         style={styles.row}
@@ -175,10 +181,7 @@ export function EditProfileScreen() {
         <Text style={styles.label}>Profile Picture</Text>
         <View style={styles.valueRow}>
           {user?.profilePicture ? (
-            <Image
-              source={{ uri: user.profilePicture }}
-              style={styles.avatar}
-            />
+            <S3Image imageUrl={user.profilePicture} style={styles.avatar} />
           ) : (
             <Icon name="account" size={28} color="#bbb" />
           )}
@@ -287,14 +290,25 @@ export function EditProfileScreen() {
           {modalVisible === "weight" && (
             <>
               <Text style={styles.modalTitle}>Edit Weight</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={inputValue}
-                onChangeText={setInputValue}
-                placeholder="Enter your weight in kg"
-                keyboardType="numeric"
-                autoFocus
-              />
+              <View style={styles.pickerContainer}>
+                <Text style={styles.pickerLabel}>Select your weight</Text>
+                <Picker
+                  selectedValue={weightValue}
+                  onValueChange={(value) => setWeightValue(String(value))}
+                  style={styles.weightPicker}
+                >
+                  {Array.from({ length: 171 }, (_, i) => {
+                    const weight = i + 30; // Start from 30kg
+                    return (
+                      <Picker.Item
+                        key={weight}
+                        label={`${weight} kg`}
+                        value={String(weight)}
+                      />
+                    );
+                  })}
+                </Picker>
+              </View>
             </>
           )}
           {modalVisible === "gender" && (
@@ -346,22 +360,99 @@ export function EditProfileScreen() {
           {modalVisible === "profilePicture" && (
             <>
               <Text style={styles.modalTitle}>Edit Profile Picture</Text>
-              {/* Add profile picture editing logic here */}
+
+              {/* Current Profile Picture */}
+              <View style={styles.currentPictureContainer}>
+                <Text style={styles.currentPictureLabel}>Current Picture:</Text>
+                {user?.profilePicture ? (
+                  <S3Image
+                    imageUrl={user.profilePicture}
+                    style={styles.currentProfileImage}
+                  />
+                ) : (
+                  <View style={styles.currentProfileImagePlaceholder}>
+                    <Icon name="account" size={40} color="#666" />
+                  </View>
+                )}
+              </View>
+
+              <ImagePickerComponent
+                uploadType="profile"
+                currentImageUri={user?.profilePicture || undefined}
+                autoUpload={true}
+                showPreview={true}
+                onImageUploaded={async (result: UploadResponse) => {
+                  if (result.success && result.imageUrl) {
+                    // Update user profile with new image URL
+                    try {
+                      const response = await userService.updateProfile({
+                        profilePicture: result.imageUrl,
+                      });
+
+                      if (response.success && user) {
+                        // Create updated user object with new profile picture
+                        const updatedUser = {
+                          ...user,
+                          profilePicture: result.imageUrl,
+                        };
+
+                        // Update context state
+                        setUser(updatedUser);
+
+                        // Update AsyncStorage
+                        await AsyncStorage.setItem(
+                          getUserDataKey(user.email),
+                          JSON.stringify(updatedUser)
+                        );
+
+                        // Show success toast and close modal
+                        setShowSuccess(true);
+                        closeModal();
+                      } else {
+                        Alert.alert(
+                          "Error",
+                          response.error || "Failed to update profile picture"
+                        );
+                      }
+                    } catch (error) {
+                      console.error("Error updating profile picture:", error);
+                      Alert.alert("Error", "Failed to update profile picture");
+                    }
+                  } else {
+                    Alert.alert(
+                      "Error",
+                      result.error || "Failed to upload image"
+                    );
+                  }
+                }}
+              />
             </>
           )}
           <View style={styles.modalActions}>
-            <Button
-              title="Cancel"
+            <TouchableOpacity
+              style={styles.cancelButton}
               onPress={closeModal}
-              color="#888"
               disabled={loading}
-            />
-            <Button
-              title="Save"
-              onPress={handleSave}
-              color="#4285F4"
-              disabled={loading}
-            />
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+
+            {modalVisible !== "profilePicture" && (
+              <TouchableOpacity
+                style={[
+                  styles.saveButton,
+                  loading && styles.saveButtonDisabled,
+                ]}
+                onPress={handleSave}
+                disabled={loading}
+              >
+                {loading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <Text style={styles.saveButtonText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            )}
           </View>
         </Animated.View>
       </Modal>
@@ -372,7 +463,8 @@ export function EditProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: "#F8F9FA",
+    paddingTop: 16,
   },
   sectionHeader: {
     backgroundColor: "#f5f5f7",
@@ -390,9 +482,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingVertical: 18,
     paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-    backgroundColor: "#fff",
+    marginHorizontal: 16,
+    marginBottom: 12,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   label: {
     fontSize: 16,
@@ -457,6 +555,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     marginTop: 16,
+    gap: 12,
   },
   genderOption: {
     paddingVertical: 10,
@@ -487,5 +586,72 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 16,
     fontWeight: "600",
+  },
+  currentPictureContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  currentPictureLabel: {
+    fontSize: 16,
+    color: "#222",
+    marginRight: 8,
+  },
+  currentProfileImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+  },
+  currentProfileImagePlaceholder: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cancelButton: {
+    padding: 12,
+    backgroundColor: "#f0f0f0",
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: "center",
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: "#222",
+    fontWeight: "600",
+  },
+  saveButton: {
+    padding: 12,
+    backgroundColor: "#000000",
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: "center",
+  },
+  saveButtonDisabled: {
+    backgroundColor: "#999999",
+  },
+  saveButtonText: {
+    fontSize: 16,
+    color: "#FFFFFF",
+    fontWeight: "600",
+  },
+  pickerContainer: {
+    marginBottom: 32,
+    alignItems: "center",
+  },
+  pickerLabel: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#000000",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  weightPicker: {
+    width: "100%",
+    height: 150,
+    backgroundColor: "#f5f5f7",
+    borderRadius: 12,
   },
 });
