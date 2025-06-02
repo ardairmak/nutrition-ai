@@ -242,10 +242,10 @@ GET / api / analytics / insights;
 
 ## 👥 **Team**
 
-**Developer:** [Your Name]  
+**Developer:** [Arda Irmak]  
 **Project:** Graduation Thesis - Computer Science  
-**Institution:** [Your University]  
-**Year:** 2024
+**Institution:** [Yeditepe University]  
+**Year:** 2025
 
 ---
 
