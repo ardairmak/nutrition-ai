@@ -41,6 +41,7 @@ model User {
     lastStreakUpdate      DateTime?
     profilePicture        String?
     profileSetupComplete  Boolean              @default(false)
+    notificationSettings  Json? // Store notification preferences
     mealEntries           MealEntry[]
     weightHistory         WeightHistory[]
     friendsInitiated      UserFriend[]         @relation("UserFriends")
@@ -70,6 +71,7 @@ model MealEntry {
     totalProtein    Float
     totalCarbs      Float
     totalFat        Float
+    imageUrl        String?
     gptAnalysisJson Json?
     createdAt       DateTime   @default(now())
     consumedAt      DateTime
